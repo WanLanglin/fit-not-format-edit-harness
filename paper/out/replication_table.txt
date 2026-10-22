@@ -1,0 +1,38 @@
+
+=== refactor / GPT-5.6-luna: 82 tasks valid in every arm and both replicates
+  text   r0: succ 0.939 first 0.60 broken 0/49 clean 0.60 out 4.3k | r1: succ 0.951 first 0.67 broken 0/55 clean 0.67 out 4.1k
+  lines  r0: succ 0.939 first 1.00 broken 11/82 clean 0.87 out 2.5k | r1: succ 0.939 first 0.93 broken 8/76 clean 0.83 out 2.6k
+  ref    r0: succ 0.963 first 0.83 broken 5/68 clean 0.77 out 2.5k | r1: succ 0.963 first 0.90 broken 2/73 clean 0.87 out 2.4k
+  lines  vs SR solved per output token: r0 1.74, r1 1.54, pooled 1.64 [1.39, 1.94]
+  ref    vs SR solved per output token: r0 1.81, r1 1.72, pooled 1.77 [1.48, 2.10]
+  first  ref vs text: +48/-11 pooled over replicates (sign test p=0.000)
+  broken first edit, lines but not ref: 17 vs ref but not lines: 5 (pooled over replicates; sign test p=0.017)
+  first  lines vs text: +59/-5 pooled over replicates (sign test p=0.000)
+  passed ref vs text: +6/-3 pooled over replicates (sign test p=0.508)
+  passed ref vs lines: +7/-3 pooled over replicates (sign test p=0.344)
+
+=== refactor / MiMo-v2.5-Pro: 85 tasks valid in every arm and both replicates
+  text   r0: succ 0.929 first 0.76 broken 5/64 clean 0.69 out 4.2k | r1: succ 0.918 first 0.79 broken 4/64 clean 0.71 out 4.0k
+  lines  r0: succ 0.859 first 0.81 broken 34/67 clean 0.39 out 3.5k | r1: succ 0.812 first 0.78 broken 37/65 clean 0.33 out 2.9k
+  ref    r0: succ 0.929 first 0.67 broken 5/56 clean 0.60 out 3.0k | r1: succ 0.941 first 0.66 broken 1/55 clean 0.64 out 2.8k
+  lines  vs SR solved per output token: r0 1.09, r1 1.19, pooled 1.14 [0.90, 1.46]
+  ref    vs SR solved per output token: r0 1.39, r1 1.47, pooled 1.43 [1.10, 1.93]
+  first  ref vs text: +25/-42 pooled over replicates (sign test p=0.050)
+  broken first edit, lines but not ref: 69 vs ref but not lines: 4 (pooled over replicates; sign test p=0.000)
+  first  lines vs text: +37/-33 pooled over replicates (sign test p=0.720)
+  passed ref vs text: +9/-7 pooled over replicates (sign test p=0.804)
+  passed ref vs lines: +25/-8 pooled over replicates (sign test p=0.005)
+
+=== canitedit / GPT-5.6-luna: 79 tasks valid in every arm and both replicates
+  text   r0: succ 0.747 first 0.92 broken 1/73 clean 0.91 out 1.2k | r1: succ 0.747 first 0.95 broken 1/75 clean 0.94 out 1.3k
+  patch  r0: succ 0.772 first 0.24 broken 0/0 clean 0.00 out 1.5k | r1: succ 0.797 first 0.19 broken 0/0 clean 0.00 out 1.5k
+  lines  r0: succ 0.797 first 0.99 broken 3/78 clean 0.95 out 1.3k | r1: succ 0.772 first 1.00 broken 3/79 clean 0.96 out 1.0k
+  ref    r0: succ 0.810 first 0.94 broken 2/74 clean 0.91 out 1.2k | r1: succ 0.810 first 0.95 broken 1/74 clean 0.92 out 1.1k
+  patch  vs SR solved per output token: r0 0.80, r1 0.89, pooled 0.84 [0.66, 1.08]
+  lines  vs SR solved per output token: r0 0.98, r1 1.32, pooled 1.13 [0.95, 1.32]
+  ref    vs SR solved per output token: r0 1.04, r1 1.22, pooled 1.13 [0.88, 1.48]
+  first  ref vs text: +8/-8 pooled over replicates (sign test p=1.000)
+  broken first edit, lines but not ref: 6 vs ref but not lines: 3 (pooled over replicates; sign test p=0.508)
+  first  lines vs text: +9/-0 pooled over replicates (sign test p=0.004)
+  passed ref vs text: +13/-3 pooled over replicates (sign test p=0.021)
+  passed ref vs lines: +9/-5 pooled over replicates (sign test p=0.424)

@@ -1,0 +1,22 @@
+GPT-5.6-luna       choice runs 82 | first form picked {'text': 0.49, 'patch': 0.35, 'lines': 0.16}
+GPT-5.6-luna       tools  runs 82 | first form picked {'text': 0.51, 'lines': 0.37, 'patch': 0.12}
+GPT-5.6-luna       single-form first edit accepted {'lines': 0.99, 'patch': 0.23, 'text': 0.93}
+GPT-5.6-luna       first edit accepted, three tools vs one tool: 0.720 -> 0.878 (+15.9 points, +16/-3, exact McNemar p=0.004)
+GLM-5.3            choice runs 82 | first form picked {'text': 0.77, 'patch': 0.16, 'content': 0.05, 'content+unknown': 0.01, 'lines+text': 0.01}
+GLM-5.3            single-form first edit accepted {'lines': 0.96, 'patch': 0.89, 'text': 0.97}
+DeepSeek-V4-Flash  choice runs 82 | first form picked {'patch': 0.64, 'lines': 0.12, 'text': 0.11, 'unknown': 0.08, 'content': 0.03, 'lines+patch': 0.01, 'lines+patch+text': 0.01}
+DeepSeek-V4-Flash  single-form first edit accepted {'lines': 0.9, 'patch': 0.25, 'text': 0.84}
+MiMo-v2.5-Pro      choice runs 82 | first form picked {'text': 0.5, 'lines': 0.32, 'patch': 0.13, 'lines+text': 0.02, 'content': 0.01, 'patch+unknown': 0.01}
+MiMo-v2.5-Pro      tools  runs 82 | first form picked {'text': 0.51, 'lines': 0.3, 'unknown': 0.11, 'content+text': 0.04, 'content': 0.02, 'patch+text': 0.01}
+MiMo-v2.5-Pro      single-form first edit accepted {'lines': 0.87, 'patch': 0.16, 'text': 0.93}
+MiMo-v2.5-Pro      first edit accepted, three tools vs one tool: 0.756 -> 0.829 (+7.3 points, +17/-11, exact McNemar p=0.345)
+Qwen3.8-Flash      tools  runs 81 | first form picked {'patch': 0.31, 'text': 0.23, 'lines': 0.22, 'unknown': 0.17, 'content': 0.06}
+Qwen3.8-Flash      single-form first edit accepted {'lines': 0.45, 'patch': 0.86, 'text': 0.66}
+GPT-5.6-luna       choice -> guided: first edit accepted 0.720 -> 0.695, output efficiency vs SR 1.01 -> 0.70
+GPT-5.6-luna       tools -> tools_guided: first edit accepted 0.878 -> 0.915, output efficiency vs SR 1.03 -> 1.06
+GLM-5.3            choice -> guided: first edit accepted 0.848 -> 0.885, output efficiency vs SR 0.98 -> 0.99
+DeepSeek-V4-Flash  choice -> guided: first edit accepted 0.413 -> 0.480, output efficiency vs SR 0.75 -> 0.64
+MiMo-v2.5-Pro      choice -> guided: first edit accepted 0.762 -> 0.838, output efficiency vs SR 1.07 -> 0.90
+MiMo-v2.5-Pro      tools -> tools_guided: first edit accepted 0.840 -> 0.864, output efficiency vs SR 1.17 -> 0.98
+Qwen3.8-Flash      tools -> tools_guided: first edit accepted 0.636 -> 0.718, output efficiency vs SR 1.24 -> 1.10
+advice raises first-edit acceptance in 6 of 7 comparisons and lowers output efficiency in 5

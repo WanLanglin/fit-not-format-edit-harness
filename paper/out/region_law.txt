@@ -1,0 +1,8 @@
+first targeted edit calls: 2339
+          n  applied  replayed  syntax_ok
+form                                     
+lines   798    0.992     0.987      0.906
+patch   377    0.955     0.955      0.983
+text   1164    0.948     0.942      0.992
+
+replay agrees with the harness (applied but replay failed): 11 calls

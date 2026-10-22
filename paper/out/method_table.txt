@@ -1,0 +1,50 @@
+fitted $/M: uncached 0.250 cached 0.020 output 1.200
+
+=== GPT-5.6-luna: 84 tasks valid in every arm (per arm valid: text 89, lines 89, verified 86, aligned 85, ref 85)
+                                     text              lines           verified            aligned                ref
+first edit accepted                  0.60               1.00               0.77               0.82               0.83
+runs that used @@ref                    -                  -                  -                  -                 56
+runs with a boundary refusal            -                  -                 21                 17                 12
+broken applied first edits        0 of 50           11 of 84            7 of 65            4 of 69            5 of 70
+clean first edit                     0.60               0.87               0.69               0.77               0.77
+task success                        0.940              0.952              0.988              0.964              0.964
+output tokens / task                 4.4k               2.5k               3.2k               2.9k               2.5k
+dollars / task                     0.0237             0.0191             0.0219             0.0201             0.0159
+efficiency vs SR (output)               1  1.78 [1.45,2.17]*  1.44 [1.15,1.76]*  1.56 [1.27,1.92]*  1.81 [1.47,2.24]*
+efficiency vs SR (billed $)             1   1.26 [0.97,1.63]   1.14 [0.90,1.45]   1.21 [0.95,1.52]  1.53 [1.27,1.84]*
+efficiency vs SR (ideal-cache $)        1  1.34 [1.13,1.60]*  1.23 [1.02,1.48]*  1.30 [1.09,1.54]*  1.41 [1.21,1.65]*
+  ref vs aligned, efficiency per output: 1.16 [1.03, 1.29]
+  ref vs aligned, efficiency per billed dollars: 1.27 [1.09, 1.50]
+  ref vs aligned, efficiency per ideal-cache dollars: 1.09 [0.99, 1.21]
+  success ref vs aligned: +2/-2 (exact McNemar p=1.000)
+  success aligned vs verified: +1/-3 (exact McNemar p=0.625)
+  success verified vs lines: +3/-0 (exact McNemar p=0.250)
+  success ref vs lines: +3/-2 (exact McNemar p=1.000)
+  success ref vs text: +3/-1 (exact McNemar p=0.625)
+  first edit accepted ref vs text: +27/-7 (p=0.001) | clean first edit: +24/-9 (p=0.014)
+  first edit accepted ref vs lines: +0/-14 (p=0.000) | clean first edit: +7/-15 (p=0.134)
+fitted $/M: uncached 0.435 cached 0.004 output 0.870
+
+=== MiMo-v2.5-Pro: 85 tasks valid in every arm (per arm valid: text 89, lines 89, verified 86, aligned 86, ref 85)
+                                     text             lines          verified           aligned                ref
+first edit accepted                  0.76              0.81              0.39              0.60               0.67
+runs that used @@ref                    -                 -                 -                 -                  3
+runs with a boundary refusal            -                 -                37                16                 16
+broken applied first edits        5 of 64          34 of 67           4 of 33           3 of 50            5 of 56
+clean first edit                     0.69              0.39              0.34              0.55               0.60
+task success                        0.929             0.859             0.894             0.941              0.929
+output tokens / task                 4.2k              3.5k              4.2k              3.4k               3.0k
+dollars / task                     0.0232            0.0245            0.0257            0.0193             0.0152
+efficiency vs SR (output)               1  1.09 [0.82,1.47]  0.94 [0.70,1.36]  1.23 [0.93,1.71]  1.39 [1.04,1.93]*
+efficiency vs SR (billed $)             1  0.87 [0.68,1.15]  0.87 [0.66,1.18]  1.21 [0.94,1.61]  1.52 [1.18,2.03]*
+efficiency vs SR (ideal-cache $)        1  0.96 [0.80,1.18]  0.96 [0.78,1.21]  1.12 [0.93,1.39]   1.20 [0.99,1.49]
+  ref vs aligned, efficiency per output: 1.13 [0.96, 1.32]
+  ref vs aligned, efficiency per billed dollars: 1.25 [1.04, 1.49]
+  ref vs aligned, efficiency per ideal-cache dollars: 1.07 [0.95, 1.19]
+  success ref vs aligned: +3/-4 (exact McNemar p=1.000)
+  success aligned vs verified: +7/-3 (exact McNemar p=0.344)
+  success verified vs lines: +11/-8 (exact McNemar p=0.648)
+  success ref vs lines: +12/-6 (exact McNemar p=0.238)
+  success ref vs text: +4/-4 (exact McNemar p=1.000)
+  first edit accepted ref vs text: +15/-23 (p=0.256) | clean first edit: +15/-23 (p=0.256)
+  first edit accepted ref vs lines: +12/-23 (p=0.090) | clean first edit: +25/-7 (p=0.002)

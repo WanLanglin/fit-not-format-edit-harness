@@ -1,0 +1,38 @@
+== first targeted edit, exact McNemar (tasks where both arms made a targeted edit)
+  canitedit      GPT-5.6-luna           lines>text +5/-0 p=0.0625 | lines>patch +62/-0 p=0.0000 | text>patch +59/-2 p=0.0000
+  canitedit      GLM-5.3                lines>text +2/-3 p=1.0000 | lines>patch +8/-3 p=0.2266 | text>patch +8/-2 p=0.1094
+  canitedit      DeepSeek-V4-Flash      lines>text +7/-4 p=0.5488 | lines>patch +42/-2 p=0.0000 | text>patch +39/-4 p=0.0000
+  canitedit      MiMo-v2.5-Pro          lines>text +3/-5 p=0.7266 | lines>patch +27/-0 p=0.0000 | text>patch +37/-3 p=0.0000
+  canitedit      Qwen3.8-Flash          lines>text +9/-22 p=0.0294 | lines>patch +7/-37 p=0.0000 | text>patch +5/-19 p=0.0066
+  aider-refactor GPT-5.6-luna           lines>text +37/-1 p=0.0000 | lines>patch +59/-0 p=0.0000 | text>patch +30/-7 p=0.0002
+  aider-refactor MiMo-v2.5-Pro          lines>text +19/-15 p=0.6076 | lines>patch +46/-5 p=0.0000 | text>patch +39/-3 p=0.0000
+
+== tokens relative to search/replace (ratio of means, paired bootstrap 95%)
+  canitedit      GPT-5.6-luna           patch x1.32 [1.04, 1.64] | lines x1.03 [0.76, 1.43]
+  canitedit      GLM-5.3                patch x0.98 [0.76, 1.26] | lines x1.10 [0.83, 1.44]
+  canitedit      DeepSeek-V4-Flash      patch x0.97 [0.74, 1.26] | lines x0.86 [0.63, 1.17]
+  canitedit      MiMo-v2.5-Pro          patch x1.34 [1.13, 1.57] | lines x1.02 [0.88, 1.17]
+  canitedit      Qwen3.8-Flash          patch x1.11 [0.87, 1.37] | lines x1.27 [0.95, 1.60]
+  aider-refactor GPT-5.6-luna           patch x1.09 [0.91, 1.32] | lines x0.90 [0.75, 1.07]
+  aider-refactor MiMo-v2.5-Pro          patch x1.72 [1.32, 2.25] | lines x1.11 [0.88, 1.40]
+
+== failed patch calls attributable to the harness being stricter than the reference (CanItEdit, patch arm)
+  GPT-5.6-luna            failed    80 | harness stricter   18 (22%) | revision contract    8 (10%) | rest (reference rejects too)    54 (68%)
+  GLM-5.3                 failed    21 | harness stricter   10 (48%) | revision contract    1 (5%) | rest (reference rejects too)    10 (48%)
+  DeepSeek-V4-Flash       failed   161 | harness stricter    7 (4%) | revision contract   40 (25%) | rest (reference rejects too)   114 (71%)
+  MiMo-v2.5-Pro           failed    79 | harness stricter    8 (10%) | revision contract    0 (0%) | rest (reference rejects too)    71 (90%)
+  Qwen3.8-Flash           failed    40 | harness stricter    5 (12%) | revision contract    1 (2%) | rest (reference rejects too)    34 (85%)
+
+== position lift in the three-tool arm: P(pick f | f listed first) - P(pick f | listed later)
+  GPT-5.6-luna           lines +0.91  text +0.73  patch +0.37   overall first pick {'text': 0.51, 'lines': 0.37, 'patch': 0.12}
+  Qwen3.8-Flash          lines +0.69  text +0.50  patch +0.73   overall first pick {'text': 0.33, 'patch': 0.31, 'lines': 0.3, 'content': 0.06}
+  MiMo-v2.5-Pro          lines -0.23  text -0.41  patch +0.00   overall first pick {'text': 0.65, 'lines': 0.33, 'content': 0.02}
+
+== whole-file rewrites (runs that used content at least once), single-interface arms
+  canitedit      GPT-5.6-luna           text 0%  patch 15%  lines 0%
+  canitedit      GLM-5.3                text 12%  patch 21%  lines 13%
+  canitedit      DeepSeek-V4-Flash      text 6%  patch 67%  lines 11%
+  canitedit      MiMo-v2.5-Pro          text 21%  patch 62%  lines 27%
+  canitedit      Qwen3.8-Flash          text 26%  patch 13%  lines 23%
+  aider-refactor GPT-5.6-luna           text 0%  patch 1%  lines 0%
+  aider-refactor MiMo-v2.5-Pro          text 6%  patch 51%  lines 8%

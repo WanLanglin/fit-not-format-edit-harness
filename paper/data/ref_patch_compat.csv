@@ -1,0 +1,177 @@
+model,task,our_error,reference_applies,reference_message
+DeepSeek-V4-Flash,101_house_prices,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,102_nfa,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,103_postfix,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,104_filesystem,argument shape,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,106_conways_game,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,107_multiindex_sort,argument shape,1,Success. Updated the following files:
+DeepSeek-V4-Flash,10_csv_parser,argument shape,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,112_elliptic_curves,patch: context-only hunk,0,Failed to find expected lines in /tmp/refpatch-z1srpqyl/solution.py:
+DeepSeek-V4-Flash,116_cfg,patch: sent without revisions,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,119_pollards_rho_factorization,patch: malformed hunk,1,Success. Updated the following files:
+DeepSeek-V4-Flash,11_fibonacci,other,1,Success. Updated the following files:
+DeepSeek-V4-Flash,120_summary_statistics,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,13_maze_solver,patch: sent without revisions,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,14_matrix_operations,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,16_interpreter,argument shape,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,18_deck_of_cards,patch: malformed hunk,1,Success. Updated the following files:
+DeepSeek-V4-Flash,1_cipher,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,21_dijkstra_bellman,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,23_bpe_tokenizer,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,24_tree_abstractions,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,28_password_strength_checker,patch: sent without revisions,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,2_cov_corr,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,34_oop_refactor,patch: sent without revisions,0,Failed to find expected lines in /tmp/refpatch-3mpb2fqt/solution.py:
+DeepSeek-V4-Flash,36_strongly_connected,patch: sent without revisions,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,37_dijkstras,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,39_vowel_count,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,3_hello_world,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,40_adjacency,patch: sent without revisions,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,46_consonants_within,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,47_merge_sort,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,49_binary_search,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,54_strategy,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,55_bm25,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,58_dependency_solver,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,60_unique_number,argument shape,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,63_knary_trees,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,68_prime_numbers_problem,argument shape,1,Success. Updated the following files:
+DeepSeek-V4-Flash,70_sieve_of_eratosthenes,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,71_euclidean_algorithm,argument shape,1,Success. Updated the following files:
+DeepSeek-V4-Flash,77_step_counter,argument shape,1,Success. Updated the following files:
+DeepSeek-V4-Flash,79_int_to_key,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,80_circular_queue,argument shape,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,85_dpll,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,86_pyast,patch: sent without revisions,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,92_heron_area,patch: sent without revisions,1,Success. Updated the following files:
+DeepSeek-V4-Flash,94_knn,argument shape,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+DeepSeek-V4-Flash,9_sorting,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+GLM-5.3,101_house_prices,patch: context-only hunk,1,Success. Updated the following files:
+GLM-5.3,111_coprime_euler,patch: context-only hunk,1,Success. Updated the following files:
+GLM-5.3,112_elliptic_curves,patch: context-only hunk,1,Success. Updated the following files:
+GLM-5.3,11_fibonacci,patch: context-only hunk,1,Success. Updated the following files:
+GLM-5.3,12_linkedlist_sort,patch: context-only hunk,1,Success. Updated the following files:
+GLM-5.3,14_matrix_operations,text: old_text matched 2+ times,1,Success. Updated the following files:
+GLM-5.3,36_strongly_connected,patch: context-only hunk,1,Success. Updated the following files:
+GLM-5.3,65_tournament_tree,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,101_house_prices,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,102_nfa,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,103_postfix,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,104_filesystem,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,106_conways_game,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,107_multiindex_sort,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,10_csv_parser,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,111_coprime_euler,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,112_elliptic_curves,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,113_schnorr_zk,patch: sent without revisions,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,115_arrangement_selections,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,117_matrix,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,119_pollards_rho_factorization,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,11_fibonacci,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,120_summary_statistics,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,12_linkedlist_sort,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,13_maze_solver,patch: sent without revisions,0,Invalid patch: The last line of the patch must be '*** End Patch'
+GPT-5.6-luna,14_matrix_operations,text: old_text matched 0 times,1,Success. Updated the following files:
+GPT-5.6-luna,16_interpreter,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,17_quiz,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,18_deck_of_cards,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,19_traffic_analysis,patch: sent without revisions,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,20_html_parser,patch: sent without revisions,1,Success. Updated the following files:
+GPT-5.6-luna,21_dijkstra_bellman,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,23_bpe_tokenizer,patch: sent without revisions,0,Invalid patch: The last line of the patch must be '*** End Patch'
+GPT-5.6-luna,24_tree_abstractions,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,28_password_strength_checker,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,2_cov_corr,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,31_bookkeeping,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,34_oop_refactor,patch: missing Begin/End markers,0,Invalid patch: The last line of the patch must be '*** End Patch'
+GPT-5.6-luna,35_topological_sort,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,36_strongly_connected,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,37_dijkstras,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,3_hello_world,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,40_adjacency,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,44_html_to_markdown,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,45_double_consonant,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,46_consonants_within,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,47_merge_sort,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,49_binary_search,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,50_syllable_count,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,51_managers_manager,patch: sent without revisions,0,Invalid patch: The last line of the patch must be '*** End Patch'
+GPT-5.6-luna,54_strategy,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,55_bm25,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,56_interference_vars,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,58_dependency_solver,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,63_knary_trees,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,65_tournament_tree,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,67_test_invariants,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,6_locked_box,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,70_sieve_of_eratosthenes,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,72_disjoint_cycles,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,73_permutation_equality,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,76_memory_alloc,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,77_step_counter,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,79_int_to_key,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,80_circular_queue,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,85_dpll,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,8_vector_lib,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,90_dna_transcriber,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,91_interest_calculator,patch: duplicated envelope / unsupported operation,0,"Invalid patch hunk on line 2: '*** Begin Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {p"
+GPT-5.6-luna,97_nash_equilibrium,patch: context-only hunk,1,Success. Updated the following files:
+GPT-5.6-luna,99_secondary_keys,patch: context-only hunk,0,"Invalid patch hunk on line 4: Unexpected line found in update hunk: '*** Begin Patch'. Every line should start with ' ' (context line), '+' "
+MiMo-v2.5-Pro,101_house_prices,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,103_postfix,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,104_filesystem,patch: non-bare @@ header,0,Failed to find context 'map_content directory @@' in /tmp/refpatch-k6_waz5l/solution.py
+MiMo-v2.5-Pro,106_conways_game,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,107_multiindex_sort,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,112_elliptic_curves,patch: non-bare @@ header,0,Failed to find context 'point_multiplication @@' in /tmp/refpatch-ntr895b3/solution.py
+MiMo-v2.5-Pro,113_schnorr_zk,patch: non-bare @@ header,0,Failed to find context 'verifier_challenge @@' in /tmp/refpatch-zydjmh4z/solution.py
+MiMo-v2.5-Pro,115_arrangement_selections,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,116_cfg,patch: non-bare @@ header,0,Failed to find context 'Token and NonTerminal @@' in /tmp/refpatch-hbn9898n/solution.py
+MiMo-v2.5-Pro,119_pollards_rho_factorization,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,11_fibonacci,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,12_linkedlist_sort,patch: non-bare @@ header,0,Failed to find context 'class Cons @@' in /tmp/refpatch-dadu685f/solution.py
+MiMo-v2.5-Pro,13_maze_solver,patch: non-bare @@ header,0,"Failed to find context '-45,9 +45,9 @@' in /tmp/refpatch-h2enrc9w/solution.py"
+MiMo-v2.5-Pro,17_quiz,patch: non-bare @@ header,0,Failed to find context '__init__ @@' in /tmp/refpatch-39awu_mw/solution.py
+MiMo-v2.5-Pro,18_deck_of_cards,patch: non-bare @@ header,0,Failed to find expected lines in /tmp/refpatch-sqfxe03w/solution.py:
+MiMo-v2.5-Pro,1_cipher,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,20_html_parser,patch: non-bare @@ header,0,Failed to find context '__init__ @@' in /tmp/refpatch-d4_4c5hv/solution.py
+MiMo-v2.5-Pro,21_dijkstra_bellman,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,22_diff_format,patch: non-bare @@ header,0,"Failed to find context '-78,6 +78,13 @@' in /tmp/refpatch-klsigfzz/solution.py"
+MiMo-v2.5-Pro,28_password_strength_checker,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,31_bookkeeping,patch: non-bare @@ header,0,Failed to find context 'buy_yarn method @@' in /tmp/refpatch-xdox9ba1/solution.py
+MiMo-v2.5-Pro,34_oop_refactor,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,35_topological_sort,patch: non-bare @@ header,0,Failed to find context '-13 @@' in /tmp/refpatch-6vv3u0zy/solution.py
+MiMo-v2.5-Pro,36_strongly_connected,patch: non-bare @@ header,0,Failed to find context '-1 +1 @@' in /tmp/refpatch-_9d2uvrb/solution.py
+MiMo-v2.5-Pro,45_double_consonant,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,46_consonants_within,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,48_max_sum_subarray,patch: non-bare @@ header,0,Failed to find expected lines in /tmp/refpatch-fwi1cvxs/solution.py:
+MiMo-v2.5-Pro,49_binary_search,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,4_tensor_operations,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,55_bm25,patch: non-bare @@ header,0,Failed to find context '__init__ @@' in /tmp/refpatch-acygap8e/solution.py
+MiMo-v2.5-Pro,60_unique_number,patch: non-bare @@ header,0,Failed to find context 'def find_non_pair(numbers: List[int]) -> int:@@' in /tmp/refpatch-cr7i59eb/solution.py
+MiMo-v2.5-Pro,65_tournament_tree,patch: non-bare @@ header,0,"Failed to find context 'def __init__(self, name, rating): @@' in /tmp/refpatch-chfam782/solution.py"
+MiMo-v2.5-Pro,68_prime_numbers_problem,patch: non-bare @@ header,0,"Failed to find context '-3,7 +3,7 @@' in /tmp/refpatch-qnyqj4un/solution.py"
+MiMo-v2.5-Pro,70_sieve_of_eratosthenes,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,71_euclidean_algorithm,patch: non-bare @@ header,0,Failed to find context 'def gcd @@' in /tmp/refpatch-nbyn8nkx/solution.py
+MiMo-v2.5-Pro,73_permutation_equality,patch: non-bare @@ header,1,Success. Updated the following files:
+MiMo-v2.5-Pro,76_memory_alloc,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,7_temperature_converter,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,81_linked_list_debug,patch: non-bare @@ header,0,Failed to find context 'def find(@@) ->' in /tmp/refpatch-ngj99fhr/solution.py
+MiMo-v2.5-Pro,85_dpll,patch: non-bare @@ header,0,"Failed to find context '-76,6 +76,11 @@' in /tmp/refpatch-q9v7tsz7/solution.py"
+MiMo-v2.5-Pro,86_pyast,patch: non-bare @@ header,0,Failed to find context 'visit_FunctionDef @@' in /tmp/refpatch-nrdsrqzz/solution.py
+MiMo-v2.5-Pro,87_documentation,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,91_interest_calculator,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,92_heron_area,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,94_knn,patch: non-bare @@ header,0,Failed to find context '    def __hash__(self) -> int @@' in /tmp/refpatch-gz9bdk1t/solution.py
+MiMo-v2.5-Pro,97_nash_equilibrium,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+MiMo-v2.5-Pro,99_secondary_keys,patch: non-bare @@ header,0,Failed to find context '__init__ @@' in /tmp/refpatch-gc8508et/solution.py
+Qwen3.8-Flash,103_postfix,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+Qwen3.8-Flash,21_dijkstra_bellman,text: old_text matched 0 times,0,Failed to find expected lines in /tmp/refpatch-n0z4t5he/solution.py:
+Qwen3.8-Flash,39_vowel_count,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+Qwen3.8-Flash,40_adjacency,patch: context-only hunk,1,Success. Updated the following files:
+Qwen3.8-Flash,44_html_to_markdown,text: old_text matched 0 times,1,Success. Updated the following files:
+Qwen3.8-Flash,54_strategy,patch: context-only hunk,1,Success. Updated the following files:
+Qwen3.8-Flash,55_bm25,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+Qwen3.8-Flash,67_test_invariants,patch: context-only hunk,1,Success. Updated the following files:
+Qwen3.8-Flash,85_dpll,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'
+Qwen3.8-Flash,8_vector_lib,text: old_text matched 0 times,0,Failed to find expected lines in /tmp/refpatch-atxoylwd/solution.py:
+Qwen3.8-Flash,91_interest_calculator,patch: missing Begin/End markers,0,Invalid patch: The first line of the patch must be '*** Begin Patch'

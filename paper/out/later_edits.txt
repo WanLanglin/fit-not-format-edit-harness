@@ -1,0 +1,6 @@
+text   first targeted edit call, mean visible output tokens: 1151
+patch  first targeted edit call, mean visible output tokens: 1108
+lines  first targeted edit call, mean visible output tokens: 624
+text   later targeted edits 84, accepted 44 (0.52), preceded by a re-read 56, stale-revision rejections 1
+patch  later targeted edits 160, accepted 89 (0.56), preceded by a re-read 82, stale-revision rejections 9
+lines  later targeted edits 53, accepted 52 (0.98), preceded by a re-read 50, stale-revision rejections 0

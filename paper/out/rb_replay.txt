@@ -1,0 +1,4 @@
+text            runs 84  replay reproduces final workspace in 84  first targeted 84  accepted 51  broken 0 of 51 replayed (unreplayed 0; multi-file first edits 48)
+lines           runs 84  replay reproduces final workspace in 84  first targeted 84  accepted 78  broken 11 of 78 replayed (unreplayed 0; multi-file first edits 73)
+patch           runs 84  replay reproduces final workspace in 84  first targeted 84  accepted 33  broken 0 of 33 replayed (unreplayed 0; multi-file first edits 31)
+lines_anchored  runs 84  replay reproduces final workspace in 84  first targeted 84  accepted 67  broken 2 of 67 replayed (unreplayed 0; multi-file first edits 63)

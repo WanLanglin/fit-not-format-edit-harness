@@ -1,0 +1,30 @@
+         bench             model  tasks  text_pass  text_out_k  patch_pass  patch_out_k  lines_pass  lines_out_k
+     canitedit      GPT-5.6-luna     82      0.756       1.148       0.780        1.490       0.805        1.266
+     canitedit           GLM-5.3     82      0.817      11.240       0.793       11.947       0.768       11.810
+     canitedit DeepSeek-V4-Flash     82      0.732       4.510       0.683        5.192       0.659        4.350
+     canitedit     MiMo-v2.5-Pro     82      0.780       1.609       0.817        2.069       0.829        1.554
+     canitedit     Qwen3.8-Flash     79      0.823       7.372       0.861        8.356       0.848        8.044
+aider-refactor      GPT-5.6-luna     89      0.944       4.343       0.944        4.495       0.944        2.526
+aider-refactor     MiMo-v2.5-Pro     88      0.932       4.291       0.841        8.698       0.841        3.622
+
+== efficiency per output, relative to search/replace (higher = better) ==
+arm                                            lines               patch
+bench          model                                                    
+aider-refactor GPT-5.6-luna       1.72 [1.39,2.09] *    0.97 [0.79,1.17]
+               MiMo-v2.5-Pro        1.05 [0.81,1.38]  0.45 [0.31,0.64] *
+canitedit      DeepSeek-V4-Flash    0.93 [0.72,1.23]    0.81 [0.62,1.10]
+               GLM-5.3              0.89 [0.62,1.32]    0.91 [0.65,1.36]
+               GPT-5.6-luna         0.97 [0.69,1.37]  0.80 [0.67,0.95] *
+               MiMo-v2.5-Pro        1.10 [0.91,1.33]  0.81 [0.69,0.97] *
+               Qwen3.8-Flash        0.96 [0.76,1.24]    0.92 [0.67,1.23]
+
+== efficiency per dollar, relative to search/replace (higher = better) ==
+arm                                          lines               patch
+bench          model                                                  
+aider-refactor GPT-5.6-luna       1.21 [0.94,1.51]    0.93 [0.73,1.14]
+               MiMo-v2.5-Pro      0.84 [0.66,1.10]  0.51 [0.37,0.70] *
+canitedit      DeepSeek-V4-Flash  1.03 [0.80,1.35]    0.86 [0.68,1.06]
+               GLM-5.3            0.87 [0.62,1.25]    0.95 [0.69,1.39]
+               GPT-5.6-luna       1.01 [0.68,1.50]    0.89 [0.69,1.14]
+               MiMo-v2.5-Pro      1.20 [0.99,1.46]    0.97 [0.78,1.23]
+               Qwen3.8-Flash      0.88 [0.69,1.18]    0.93 [0.69,1.24]

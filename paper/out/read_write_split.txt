@@ -1,0 +1,34 @@
+
+canitedit / GPT-5.6-luna: 81 paired tasks (means per task, thousands of tokens)
+  arm    uncached in  cached in  cached %  visible out  reasoning        $
+  text           5.5        3.3       37%          0.5        0.6   0.0028
+  lines          5.6        3.5       38%          0.4        0.8   0.0029
+  aligned         4.0        4.2       51%          0.5        0.6   0.0023
+  ref            2.3        7.9       77%          0.5        0.7   0.0022
+
+canitedit / MiMo-v2.5-Pro: 82 paired tasks (means per task, thousands of tokens)
+  arm    uncached in  cached in  cached %  visible out  reasoning        $
+  text           6.0        7.3       55%          0.7        1.0   0.0041
+  lines          5.1        8.6       63%          0.6        1.0   0.0036
+  aligned         2.9       11.7       80%          0.7        0.9   0.0027
+  ref            2.7       12.0       82%          0.7        1.0   0.0027
+
+aider-refactor / GPT-5.6-luna: 84 paired tasks (means per task, thousands of tokens)
+  arm    uncached in  cached in  cached %  visible out  reasoning        $
+  text          73.0       16.4       18%          3.1        1.2   0.0237
+  lines         63.3       16.2       20%          1.4        1.1   0.0191
+  aligned        65.7       15.3       19%          1.6        1.2   0.0201
+  ref           49.4       27.3       36%          1.2        1.2   0.0159
+
+aider-refactor / MiMo-v2.5-Pro: 85 paired tasks (means per task, thousands of tokens)
+  arm    uncached in  cached in  cached %  visible out  reasoning        $
+  text          44.6       38.8       47%          2.5        1.7   0.0232
+  lines         48.9       42.5       47%          1.9        1.6   0.0245
+  aligned        37.3       37.3       50%          2.3        1.2   0.0193
+  ref           28.7       40.5       58%          1.9        1.1   0.0152
+
+canitedit / Claude-Sonnet-5: 80 paired tasks (means per task, thousands of tokens)
+  arm    uncached in  cached in  cached %  visible out  reasoning        $
+  text          17.1        0.0        0%          0.9        1.4   0.0573
+  lines         20.6        0.0        0%          0.8        1.4   0.0635
+  ref           19.0        0.0        0%          0.8        1.0   0.0562

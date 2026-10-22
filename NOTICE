@@ -1,0 +1,8 @@
+Fit, Not Format at the Edit Interface: code and data
+Copyright 2026 Langlin Wan, Zhixuan Liang, Guangyuan Wang, Shilong Liu
+
+This repository contains patches to S-Code (https://github.com/sai-foundation/s-code), licensed under the Apache
+License 2.0, in harness/. It vendors Aider's refactoring benchmark and refactor_tools.py
+(https://github.com/Aider-AI/aider), licensed under the Apache License 2.0, in editbench/vendor/; the benchmark's
+task files come from open-source projects and keep their original licenses (eight Ansible files are GPL-3.0). CanItEdit and
+RefactorBench are downloaded at pinned revisions and keep their own licenses (see README.md).

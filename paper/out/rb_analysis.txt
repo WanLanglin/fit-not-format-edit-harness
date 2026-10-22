@@ -1,0 +1,31 @@
+tasks in order: 84; valid in every arm: 84; missing or invalid somewhere: 0
+
+=== all: 84 tasks valid in every arm
+search/replace     success  63 (0.75)  first accepted 51/84  rejected edit calls 155/399  output/task 4.4k  $/task 0.0137
+line range         success  63 (0.75)  first accepted 78/84  rejected edit calls 24/331  output/task 3.5k  $/task 0.0126
+                   vs SR: success +3/-3 p=1.000; first accepted +31/-4 p=0.000; per output token 1.26 [1.05, 1.58]; per dollar 1.09 [0.92, 1.31]
+patch              success  65 (0.77)  first accepted 33/84  rejected edit calls 317/554  output/task 4.5k  $/task 0.0142
+                   vs SR: success +3/-1 p=0.625; first accepted +9/-27 p=0.004; per output token 1.02 [0.92, 1.14]; per dollar 1.00 [0.88, 1.13]
+verified selection success  66 (0.79)  first accepted 67/84  rejected edit calls 53/258  output/task 4.0k  $/task 0.0121
+                   vs SR: success +7/-4 p=0.549; first accepted +23/-7 p=0.005; per output token 1.18 [0.88, 1.59]; per dollar 1.19 [0.98, 1.47]
+verified selection runs using @@ref: same file 0, naming a file 7
+
+=== instructions that move code: 34 tasks valid in every arm
+search/replace     success  24 (0.71)  first accepted 22/34  rejected edit calls 66/186  output/task 4.9k  $/task 0.0155
+line range         success  22 (0.65)  first accepted 30/34  rejected edit calls 18/172  output/task 4.0k  $/task 0.0148
+                   vs SR: success +1/-3 p=0.625; first accepted +12/-4 p=0.077; per output token 1.11 [0.90, 1.37]; per dollar 0.96 [0.77, 1.19]
+patch              success  25 (0.74)  first accepted 14/34  rejected edit calls 87/205  output/task 5.0k  $/task 0.0150
+                   vs SR: success +2/-1 p=1.000; first accepted +3/-11 p=0.057; per output token 1.02 [0.87, 1.21]; per dollar 1.08 [0.91, 1.30]
+verified selection success  27 (0.79)  first accepted 25/34  rejected edit calls 34/143  output/task 4.4k  $/task 0.0144
+                   vs SR: success +4/-1 p=0.375; first accepted +9/-6 p=0.607; per output token 1.25 [1.03, 1.53]; per dollar 1.21 [1.01, 1.46]
+verified selection runs using @@ref: same file 0, naming a file 7
+
+=== instructions that do not move code: 50 tasks valid in every arm
+search/replace     success  39 (0.78)  first accepted 29/50  rejected edit calls 89/213  output/task 4.1k  $/task 0.0125
+line range         success  41 (0.82)  first accepted 48/50  rejected edit calls 6/159  output/task 3.2k  $/task 0.0112
+                   vs SR: success +2/-0 p=0.500; first accepted +19/-0 p=0.000; per output token 1.38 [1.06, 2.00]; per dollar 1.18 [0.95, 1.59]
+patch              success  40 (0.80)  first accepted 19/50  rejected edit calls 230/349  output/task 4.2k  $/task 0.0137
+                   vs SR: success +1/-0 p=1.000; first accepted +6/-16 p=0.052; per output token 1.02 [0.88, 1.19]; per dollar 0.94 [0.81, 1.11]
+verified selection success  39 (0.78)  first accepted 42/50  rejected edit calls 19/115  output/task 3.7k  $/task 0.0106
+                   vs SR: success +3/-3 p=1.000; first accepted +14/-1 p=0.001; per output token 1.14 [0.69, 1.92]; per dollar 1.19 [0.86, 1.72]
+verified selection runs using @@ref: same file 0, naming a file 0

@@ -1,0 +1,59 @@
+
+=== canitedit / GPT-5.6-luna: 81 tasks valid in every arm | replay matches workspace: {'aligned': '81/81', 'ref': '81/81'}
+                               text              patch             lines           aligned                ref
+runs that used @@ref              -                  -                 -                 -                  0
+task success                  0.753              0.778             0.802             0.790              0.802
+first edit accepted            0.93               0.23              0.99              0.95               0.94
+broken applied first edits  1 of 75             0 of 0           3 of 80           1 of 77            2 of 76
+output tokens / task           1.2k               1.5k              1.3k              1.1k               1.2k
+dollars / task               0.0028             0.0032            0.0029            0.0023             0.0022
+efficiency vs SR (output)         1  0.80 [0.67,0.95]*  0.97 [0.70,1.37]  1.11 [0.93,1.32]   1.02 [0.87,1.23]
+efficiency vs SR (dollars)        1   0.89 [0.69,1.14]  1.01 [0.69,1.50]  1.24 [0.98,1.56]  1.35 [1.09,1.73]*
+  ref vs aligned: success +3/-2 (p=1.000) | efficiency per output 0.92 [0.79,1.06] | per dollar 1.09 [0.89,1.33]
+
+=== canitedit / MiMo-v2.5-Pro: 82 tasks valid in every arm | replay matches workspace: {'aligned': '82/82', 'ref': '82/82'}
+                               text              patch              lines            aligned                ref
+runs that used @@ref              -                  -                  -                  -                  0
+task success                  0.780              0.817              0.829              0.829              0.793
+first edit accepted            0.93               0.16               0.87               0.64               0.71
+broken applied first edits  1 of 63             0 of 0            2 of 52            0 of 43            1 of 50
+output tokens / task           1.6k               2.1k               1.6k               1.6k               1.7k
+dollars / task               0.0041             0.0044             0.0036             0.0027             0.0027
+efficiency vs SR (output)         1  0.81 [0.69,0.97]*   1.10 [0.91,1.34]   1.07 [0.91,1.25]   0.98 [0.82,1.15]
+efficiency vs SR (dollars)        1   0.97 [0.78,1.23]  1.20 [1.01,1.48]*  1.59 [1.35,1.87]*  1.54 [1.29,1.90]*
+  ref vs aligned: success +1/-4 (p=0.375) | efficiency per output 0.92 [0.77,1.10] | per dollar 0.97 [0.82,1.17]
+
+=== aider-refactor / GPT-5.6-luna: 84 tasks valid in every arm | replay matches workspace: {'aligned': '84/84', 'ref': '84/84'}
+                               text             patch              lines            aligned                ref
+runs that used @@ref              -                 -                  -                  -                 56
+task success                  0.940             0.952              0.952              0.964              0.964
+first edit accepted            0.60              0.32               1.00               0.82               0.83
+broken applied first edits  0 of 50            0 of 0           11 of 84            4 of 69            5 of 70
+output tokens / task           4.4k              4.5k               2.5k               2.9k               2.5k
+dollars / task               0.0237            0.0252             0.0191             0.0201             0.0159
+efficiency vs SR (output)         1  0.99 [0.80,1.19]  1.78 [1.43,2.19]*  1.56 [1.27,1.92]*  1.81 [1.47,2.22]*
+efficiency vs SR (dollars)        1  0.96 [0.75,1.20]   1.26 [0.98,1.59]   1.21 [0.96,1.53]  1.53 [1.28,1.87]*
+  ref vs aligned: success +2/-2 (p=1.000) | efficiency per output 1.16 [1.04,1.30] | per dollar 1.27 [1.09,1.49]
+
+=== aider-refactor / MiMo-v2.5-Pro: 84 tasks valid in every arm | replay matches workspace: {'aligned': '84/84', 'ref': '84/84'}
+                               text              patch             lines           aligned                ref
+runs that used @@ref              -                  -                 -                 -                  3
+task success                  0.929              0.845             0.857             0.940              0.940
+first edit accepted            0.76               0.20              0.80              0.61               0.66
+broken applied first edits  5 of 63             0 of 0          33 of 66           3 of 50            5 of 55
+output tokens / task           4.2k               8.4k              3.4k              3.4k               3.0k
+dollars / task               0.0232             0.0415            0.0240            0.0189             0.0153
+efficiency vs SR (output)         1  0.45 [0.32,0.64]*  1.12 [0.84,1.46]  1.25 [0.94,1.72]  1.40 [1.06,1.95]*
+efficiency vs SR (dollars)        1  0.51 [0.38,0.69]*  0.89 [0.69,1.16]  1.24 [0.97,1.64]  1.54 [1.18,2.07]*
+  ref vs aligned: success +3/-3 (p=1.000) | efficiency per output 1.13 [0.95,1.32] | per dollar 1.24 [1.04,1.48]
+
+=== canitedit / Claude-Sonnet-5: 80 tasks valid in every arm
+                               text             lines                ref
+runs that used @@ref              -                 -                  0
+task success                  0.787             0.825              0.775
+first edit accepted            0.92              1.00               0.97
+broken applied first edits  0 of 70           0 of 77            0 of 78
+output tokens / task           2.3k              2.2k               1.8k
+dollars / task               0.0573            0.0635             0.0562
+efficiency vs SR (output)         1  1.09 [0.81,1.47]  1.25 [1.00,1.61]*
+efficiency vs SR (dollars)        1  0.95 [0.78,1.17]   1.00 [0.85,1.20]

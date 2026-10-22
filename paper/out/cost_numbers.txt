@@ -1,0 +1,63 @@
+== CanItEdit, every arm: pass | first edit ok | failed edits/run | model calls | tokens/task | tokens per SOLVED task | x vs search/replace
+
+GPT-5.6-luna  (paired tasks 82)
+   text          pass 0.756 | first 0.927 | fails  0.12 | calls   5.0 | tok    9.9k | per solved   13.1k | x1.00
+   patch         pass 0.780 | first 0.232 | fails  0.98 | calls   5.9 | tok   13.0k | per solved   16.7k | x1.27
+   lines         pass 0.805 | first 0.988 | fails  0.07 | calls   5.1 | tok   10.3k | per solved   12.8k | x0.97
+   choice        pass 0.768 | first 0.720 | fails  0.43 | calls   5.3 | tok   12.5k | per solved   16.2k | x1.24
+   guided        pass 0.768 | first 0.695 | fails  0.49 | calls   5.8 | tok   14.7k | per solved   19.2k | x1.46
+   tools         pass 0.780 | first 0.878 | fails  0.20 | calls   5.1 | tok   12.7k | per solved   16.3k | x1.24
+   tools_guided  pass 0.744 | first 0.915 | fails  0.12 | calls   4.8 | tok   11.2k | per solved   15.0k | x1.14
+
+GLM-5.3  (paired tasks 82)
+   text          pass 0.817 | first 0.951 | fails  0.07 | calls   5.7 | tok   26.6k | per solved   32.5k | x1.00
+   patch         pass 0.793 | first 0.817 | fails  0.26 | calls   5.8 | tok   26.1k | per solved   33.0k | x1.01
+   lines         pass 0.768 | first 0.890 | fails  0.12 | calls   6.4 | tok   29.3k | per solved   38.1k | x1.17
+   choice        pass 0.817 | first 0.829 | fails  0.26 | calls   5.7 | tok   28.4k | per solved   34.7k | x1.07
+   guided        pass 0.829 | first 0.854 | fails  0.21 | calls   5.9 | tok   30.5k | per solved   36.7k | x1.13
+
+DeepSeek-V4-Flash  (paired tasks 82)
+   text          pass 0.732 | first 0.793 | fails  0.59 | calls  16.5 | tok  149.4k | per solved  204.2k | x1.00
+   patch         pass 0.683 | first 0.329 | fails  1.96 | calls  18.3 | tok  144.6k | per solved  211.8k | x1.04
+   lines         pass 0.659 | first 0.805 | fails  0.38 | calls  14.5 | tok  128.3k | per solved  194.8k | x0.95
+   choice        pass 0.695 | first 0.402 | fails  1.95 | calls  20.3 | tok  168.1k | per solved  241.8k | x1.18
+   guided        pass 0.707 | first 0.463 | fails  1.67 | calls  21.0 | tok  216.5k | per solved  306.0k | x1.50
+
+MiMo-v2.5-Pro  (paired tasks 81)
+   text          pass 0.778 | first 0.951 | fails  0.07 | calls   4.4 | tok   15.0k | per solved   19.3k | x1.00
+   patch         pass 0.815 | first 0.432 | fails  0.95 | calls   5.2 | tok   20.0k | per solved   24.6k | x1.28
+   lines         pass 0.827 | first 0.901 | fails  0.11 | calls   4.4 | tok   15.3k | per solved   18.5k | x0.96
+   choice        pass 0.815 | first 0.765 | fails  0.36 | calls   4.6 | tok   17.6k | per solved   21.5k | x1.12
+   guided        pass 0.802 | first 0.840 | fails  0.30 | calls   4.7 | tok   20.5k | per solved   25.5k | x1.32
+   tools         pass 0.840 | first 0.852 | fails  0.20 | calls   4.4 | tok   18.1k | per solved   21.6k | x1.12
+   tools_guided  pass 0.790 | first 0.864 | fails  0.19 | calls   4.3 | tok   18.2k | per solved   23.1k | x1.20
+
+Qwen3.8-Flash  (paired tasks 76)
+   text          pass 0.829 | first 0.697 | fails  0.63 | calls   8.3 | tok   37.4k | per solved   45.1k | x1.00
+   patch         pass 0.868 | first 0.868 | fails  0.47 | calls   8.6 | tok   41.1k | per solved   47.3k | x1.05
+   lines         pass 0.855 | first 0.526 | fails  1.09 | calls  10.0 | tok   49.2k | per solved   57.5k | x1.27
+   tools         pass 0.842 | first 0.697 | fails  0.63 | calls   7.4 | tok   37.3k | per solved   44.3k | x0.98
+   tools_guided  pass 0.882 | first 0.737 | fails  0.79 | calls   9.2 | tok   49.7k | per solved   56.4k | x1.25
+
+== large files
+
+GPT-5.6-luna  (paired tasks 89)
+   text          pass 0.944 | first 0.584 | fails  1.15 | calls  14.0 | tok   92.7k | per solved   98.2k | x1.00
+   patch         pass 0.944 | first 0.326 | fails  1.87 | calls  15.4 | tok  101.1k | per solved  107.1k | x1.09
+   lines         pass 0.944 | first 0.989 | fails  0.02 | calls  13.8 | tok   83.2k | per solved   88.1k | x0.90
+   choice        pass 0.921 | first 0.461 | fails  1.04 | calls  16.7 | tok  107.3k | per solved  116.5k | x1.19
+   guided        pass 0.944 | first 0.483 | fails  0.92 | calls  16.5 | tok  110.6k | per solved  117.2k | x1.19
+
+MiMo-v2.5-Pro  (paired tasks 88)
+   text          pass 0.932 | first 0.761 | fails  0.45 | calls  11.8 | tok   90.6k | per solved   97.2k | x1.00
+   patch         pass 0.841 | first 0.364 | fails  2.08 | calls  14.6 | tok  156.0k | per solved  185.5k | x1.91
+   lines         pass 0.841 | first 0.807 | fails  0.32 | calls  12.7 | tok  101.0k | per solved  120.1k | x1.24
+
+== what a failed first edit costs (same task, single-interface arms: arms whose first targeted edit failed vs arms where it applied)
+  canitedit      GPT-5.6-luna            tasks  64 | tokens: applied    9.5k  failed   15.8k  (x1.67) | model calls 4.9 -> 6.7
+  canitedit      GLM-5.3                 tasks  13 | tokens: applied   23.6k  failed   32.5k  (x1.38) | model calls 6.2 -> 8.6
+  canitedit      DeepSeek-V4-Flash       tasks  51 | tokens: applied  102.3k  failed  128.9k  (x1.26) | model calls 12.9 -> 17.5
+  canitedit      MiMo-v2.5-Pro           tasks  46 | tokens: applied   14.4k  failed   23.9k  (x1.66) | model calls 4.3 -> 6.0
+  canitedit      Qwen3.8-Flash           tasks  51 | tokens: applied   47.0k  failed   57.9k  (x1.23) | model calls 9.4 -> 11.3
+  aider-refactor GPT-5.6-luna            tasks  67 | tokens: applied   81.4k  failed  124.5k  (x1.53) | model calls 13.3 -> 18.1
+  aider-refactor MiMo-v2.5-Pro           tasks  66 | tokens: applied  101.7k  failed  154.7k  (x1.52) | model calls 12.7 -> 17.3

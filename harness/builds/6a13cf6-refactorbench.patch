@@ -1,0 +1,762 @@
+diff --git a/crates/agent-core/src/lib.rs b/crates/agent-core/src/lib.rs
+index 4fd1400..3b58c3b 100644
+--- a/crates/agent-core/src/lib.rs
++++ b/crates/agent-core/src/lib.rs
+@@ -164,6 +164,17 @@ const MAX_INCOMPLETE_MODEL_RETRIES: u32 = 2;
+ const MAX_MODEL_STREAM_RETRIES: u32 = 2;
+ const MAX_ADAPTIVE_OUTPUT_TOKENS: u32 = 32_768;
+ const RECENT_DETAILED_TOOL_RESULTS: usize = 6;
++
++/// How many recent tool results keep their detail. Experiment-only: the
++/// harness may raise it with `S_CODE_EXPERIMENT_DETAILED_TOOL_RESULTS`, because
++/// repository-scale tasks need more files in view than the shipped six results
++/// hold; unset, the shipped value applies.
++pub fn detailed_tool_results() -> usize {
++    std::env::var_os("S_CODE_EXPERIMENT")
++        .and(std::env::var("S_CODE_EXPERIMENT_DETAILED_TOOL_RESULTS").ok())
++        .and_then(|value| value.parse().ok())
++        .unwrap_or(RECENT_DETAILED_TOOL_RESULTS)
++}
+ const BUDGET_CONVERGENCE_REMINDER: &str = "The Turn is approaching its execution budget. If the requested work is already verified, stop using tools and return the verified result. Otherwise perform only the highest-value remaining action, then verify and conclude. Do not weaken tests or claim unobserved success.";
+ 
+ #[derive(Clone, Debug, Serialize, Deserialize)]
+@@ -1610,7 +1621,8 @@ fn compact_superseded_tool_history(messages: &mut Vec<ModelMessage>) -> usize {
+                 .flatten()
+         })
+         .collect::<Vec<_>>();
+-    if tool_messages.len() <= RECENT_DETAILED_TOOL_RESULTS {
++    let recent = detailed_tool_results();
++    if tool_messages.len() <= recent {
+         return 0;
+     }
+ 
+@@ -1619,7 +1631,7 @@ fn compact_superseded_tool_history(messages: &mut Vec<ModelMessage>) -> usize {
+     // Without this pin, the concrete failure disappears at exactly the point
+     // the model has gathered enough source context to make a fix.
+     let pinned_failure = latest_failed_verifier_result(messages);
+-    let older = tool_messages[..tool_messages.len() - RECENT_DETAILED_TOOL_RESULTS]
++    let older = tool_messages[..tool_messages.len() - recent]
+         .iter()
+         .filter(|(index, _)| Some(*index) != pinned_failure)
+         .collect::<Vec<_>>();
+diff --git a/crates/daemon/src/editing.rs b/crates/daemon/src/editing.rs
+index 2157a70..2d192c5 100644
+--- a/crates/daemon/src/editing.rs
++++ b/crates/daemon/src/editing.rs
+@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
+ const PROMPT_MARKER: &str = "S-Code editing format:\n";
+ const LINES_INSTRUCTIONS: &str = "Use files with per-file path, expected_revision and edits containing start_line/end_line/new_text. Ranges are 1-based, inclusive, non-overlapping and refer to the original numbered_content. Never copy line-number prefixes into new_text.";
+ const LINES_ANCHORED_INSTRUCTIONS: &str = "Use files with per-file path, expected_revision and edits containing start_line/end_line/first_line/last_line/new_text. Ranges are 1-based, inclusive, non-overlapping and refer to the original numbered_content. first_line and last_line are the exact text of lines start_line and end_line as read, without the line-number prefix; the edit is refused if either does not match. Never copy line-number prefixes into new_text. To move code without retyping it, delete it with an edit whose new_text is empty and, in another edit's new_text, write a line @@ref A-B@@ where lines A-B lie inside the deleted range; that line stands for the original lines A-B, re-indented so their shallowest line sits at the @@ref line's indentation. Example: to make the method at lines 120-150 a top-level function above line 10, which reads class A:, edit 120-150 with new_text \"\" and edit 10-10 with new_text \"def f(x):\\n    @@ref 121-150@@\\n\\n\\nclass A:\\n\".";
++const CROSS_FILE_REF_INSTRUCTIONS: &str = " To move code to another file, select it with an edit in its own file in the same call and write a line @@ref path:A-B@@, naming that file's path, in the other file's new_text or in a new file's content.";
++const CROSS_FILE_REF_NEW_TEXT: &str = " A line @@ref path:A-B@@ stands for lines A-B of another file, which must lie inside a range edited in that file in this call.";
++const CROSS_FILE_REF_CONTENT: &str = "Whole file. A line @@ref path:A-B@@ stands for lines A-B of another file, which must lie inside a range edited in that file in this call, re-indented to that line's indentation.";
+ const TEXT_INSTRUCTIONS: &str = "Use files with per-file path, expected_revision and edits containing old_text/new_text. Copy old_text exactly, including whitespace, with enough context to match once. Replacements within a file run in array order; later edits see earlier results.";
+ const PATCH_INSTRUCTIONS: &str = "Use patch plus a revisions object keyed by every patch path. Supported syntax: *** Begin Patch, *** Add File: path or *** Update File: path, bare @@ before each update hunk, lines prefixed by space (context), - (remove), or + (add), and *** End Patch. Update hunks match exactly once in sequence, including trailing newlines; include existing context for insertions. No fuzzy matching, named/numbered @@ headers, Delete/Move operations or EOF markers. For files without trailing newlines or full replacements, use the files/content form instead.";
+ const COMMON_INSTRUCTIONS: &str = "Read existing files first and copy each file's 16-character revision. Use JSON null only for a new file. A revision belongs to one file, not the batch. Batch known independent edits for up to 32 unique paths and 16 MiB total content. All edits are validated before any write; filesystem writes are sequential, not a cross-file transaction. On a partial failure inspect the reported applied paths and re-read before retrying; Turn undo records remain available. Use content for creation or deliberate whole-file replacement. The editing format does not change permissions, sandbox or approval requirements.";
+@@ -222,7 +225,15 @@ fn configure_with_order(
+         EditingMode::ChoiceTools => TOOLS_PREAMBLE.to_owned(),
+         EditingMode::ChoiceToolsGuided => format!("{TOOLS_PREAMBLE}\n{TOOLS_CONTENT_GUIDANCE}"),
+         EditingMode::Auto | EditingMode::Lines => LINES_INSTRUCTIONS.to_owned(),
+-        EditingMode::LinesAnchored => LINES_ANCHORED_INSTRUCTIONS.to_owned(),
++        EditingMode::LinesAnchored => {
++            let mut text = LINES_ANCHORED_INSTRUCTIONS.to_owned();
++            // Experiment-only: @@ref may name another file of the call. Off
++            // unless the harness sets the variable.
++            if cross_file_ref() {
++                text.push_str(CROSS_FILE_REF_INSTRUCTIONS);
++            }
++            text
++        }
+         EditingMode::Text => TEXT_INSTRUCTIONS.to_owned(),
+         EditingMode::Patch => PATCH_INSTRUCTIONS.to_owned(),
+         EditingMode::Choice | EditingMode::ChoiceGuided => {
+@@ -310,13 +321,28 @@ pub(crate) fn experiment_profile(
+     })
+ }
+ 
++/// Experiment-only: whether `lines_anchored` tells the model that `@@ref` may
++/// name another file of the call.
++fn cross_file_ref() -> bool {
++    std::env::var_os("S_CODE_EXPERIMENT_CROSS_FILE_REF").is_some()
++}
++
+ fn schema(mode: EditingMode) -> Value {
+     let revision = json!({"type":["string","null"],"minLength":16,"maxLength":16});
+     let text_edit = json!({"type":"object","additionalProperties":false,"properties":{"old_text":{"type":"string","minLength":1},"new_text":{"type":"string"}},"required":["old_text","new_text"]});
+     let line_edit = json!({"type":"object","additionalProperties":false,"properties":{"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1},"new_text":{"type":"string"}},"required":["start_line","end_line","new_text"]});
+     let anchored_edit = json!({"type":"object","additionalProperties":false,"properties":{"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1},"first_line":{"type":"string"},"last_line":{"type":"string"},"new_text":{"type":"string","description":"Replacement lines. A line @@ref A-B@@ stands for the original lines A-B, which must lie inside a range edited in this call, re-indented to that line's indentation. Move code this way instead of retyping it."}},"required":["start_line","end_line","first_line","last_line","new_text"]});
++    let mut anchored_edit = anchored_edit;
+     let edit_array = |item: Value| json!({"type":"array","minItems":1,"maxItems":100,"items":item});
+     let mut file = json!({"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"},"expected_revision":revision,"content":{"type":"string"}},"required":["path","expected_revision"]});
++    if mode == EditingMode::LinesAnchored && cross_file_ref() {
++        let description = &mut anchored_edit["properties"]["new_text"]["description"];
++        *description = Value::from(format!(
++            "{}{CROSS_FILE_REF_NEW_TEXT}",
++            description.as_str().unwrap_or_default()
++        ));
++        file["properties"]["content"]["description"] = Value::from(CROSS_FILE_REF_CONTENT);
++    }
+     if mode == EditingMode::Patch {
+         file["required"] = json!(["path", "expected_revision", "content"]);
+     } else {
+diff --git a/crates/daemon/src/lib.rs b/crates/daemon/src/lib.rs
+index 9a59a1c..fe6ffb1 100644
+--- a/crates/daemon/src/lib.rs
++++ b/crates/daemon/src/lib.rs
+@@ -16132,8 +16132,21 @@ async fn execute_turn(
+         }
+         Ok::<(), ApiError>(())
+     });
++    // Experiment-only: repository-scale tasks read and search more than the
++    // shipped turn allows, so the harness may raise the call limits. Unset, the
++    // shipped limits apply; turn_profile records the values used.
++    let mut limits = TurnLimits::default();
++    if let Some(value) = experiment::env_override("S_CODE_EXPERIMENT_MAX_TOOL_CALLS") {
++        limits.max_tool_calls = value;
++    }
++    if let Some(value) = experiment::env_override("S_CODE_EXPERIMENT_MAX_MODEL_CALLS") {
++        limits.max_model_calls = value;
++    }
++    if let Some(value) = experiment::env_override("S_CODE_EXPERIMENT_MAX_TOTAL_TOKENS") {
++        limits.max_total_tokens = value;
++    }
+     let runner =
+-        AgentRunner::new(provider.clone(), executor, TurnLimits::default()).with_observer(observer);
++        AgentRunner::new(provider.clone(), executor, limits.clone()).with_observer(observer);
+     let mut tools = tools_for_profile(&state, profile);
+     let (editing_mode, choice_order) =
+         state
+@@ -16143,7 +16156,6 @@ async fn execute_turn(
+     let max_output_tokens =
+         experiment::env_override("S_CODE_EXPERIMENT_MAX_OUTPUT_TOKENS").unwrap_or(8192);
+     if std::env::var_os("S_CODE_EXPERIMENT").is_some() {
+-        let limits = TurnLimits::default();
+         let mut payload =
+             editing::experiment_profile(&messages, &tools, editing_mode, choice_order);
+         payload["model"] = serde_json::json!(session.model);
+@@ -16159,6 +16171,8 @@ async fn execute_turn(
+             "max_cost_micros": limits.max_cost_micros,
+             "max_total_tokens": limits.max_total_tokens,
+         });
++        payload["detailed_tool_results"] =
++            serde_json::json!(s_code_agent_core::detailed_tool_results());
+         state
+             .publish(Event {
+                 id: Id::new("evt"),
+diff --git a/crates/execution/src/editing.rs b/crates/execution/src/editing.rs
+index 56eefd1..5f05c8d 100644
+--- a/crates/execution/src/editing.rs
++++ b/crates/execution/src/editing.rs
+@@ -1,12 +1,13 @@
+ //! Editing wire formats share version checks, path checks and Turn undo records.
+ use super::{
+-    ApplyPatchArgs, ExecutionError, ExecutionService, FileEdit, expected_revision_matches,
++    ApplyPatchArgs, ExecutionError, ExecutionService, FileEdit, RefSource, StagedFile,
++    expected_revision_matches,
+ };
+ use s_code_protocol::ToolCall;
+ use s_code_tool_runtime::{FileReplacement, FileSnapshot, ToolError, ToolRuntime, content_sha256};
+ use serde_json::Value;
+ use std::{
+-    collections::BTreeSet,
++    collections::{BTreeMap, BTreeSet},
+     path::{Component, Path},
+ };
+ 
+@@ -85,7 +86,7 @@ pub(crate) fn parse(value: &Value) -> Result<Vec<ApplyPatchArgs>, ExecutionError
+ fn prepare_file(
+     runtime: &ToolRuntime,
+     mut patch: ApplyPatchArgs,
+-) -> Result<(FileSnapshot, FileReplacement, String, Vec<String>), ExecutionError> {
++) -> Result<(FileSnapshot, StagedFile, Option<RefSource>), ExecutionError> {
+     let snapshot = runtime.snapshot_file(&patch.path)?;
+     let expected_revision = patch
+         .expected_revision
+@@ -117,10 +118,8 @@ fn prepare_file(
+             "exact text edits require an existing file; use content to create a file".into(),
+         ));
+     }
+-    let (replacement, notes) =
+-        patch.into_replacement_with_notes(snapshot.content.as_deref().unwrap_or_default())?;
+-    let after_sha256 = content_sha256(replacement.content.as_bytes());
+-    Ok((snapshot, replacement, after_sha256, notes))
++    let (staged, source) = patch.stage(snapshot.content.as_deref().unwrap_or_default())?;
++    Ok((snapshot, staged, source))
+ }
+ 
+ impl ExecutionService {
+@@ -146,15 +145,47 @@ impl ExecutionService {
+         let mut prepared = Vec::new();
+         let mut total_bytes = 0usize;
+         let mut snapshot_bytes = 0usize;
+-        // Resolve every path, version and edit before the first mutation.
++        // Experiment-only (`lines_anchored`): every file's verified selections,
++        // and the files whose `@@ref path:A-B@@` lines need another file's.
++        let mut sources = BTreeMap::new();
++        let mut deferred = Vec::new();
++        let finish = |staged: StagedFile, sources: &BTreeMap<String, RefSource>| {
++            let path = staged.path().to_owned();
++            staged.finish(sources).map_err(|error| {
++                invalid(format!(
++                    "cannot prepare {path}: {error}; no files were written"
++                ))
++            })
++        };
++        let mut add_content = |content: &str| {
++            total_bytes = total_bytes.saturating_add(content.len());
++            if total_bytes > MAX_EDIT_BYTES {
++                return Err(ExecutionError::Arguments(
++                    "edited content exceeds 16 MiB per call".into(),
++                ));
++            }
++            Ok(())
++        };
++        // Resolve every path, version and edit before the first mutation. A
++        // file is finished where it was before cross-file references existed,
++        // so the first error reported is unchanged; only a file whose @@ref
++        // names another file waits until every file is staged.
+         for patch in patches {
+             let path = patch.path.clone();
+-            let (snapshot, replacement, after_sha256, notes) = prepare_file(runtime, patch)
+-                .map_err(|error| {
+-                    invalid(format!(
+-                        "cannot prepare {path}: {error}; no files were written"
+-                    ))
+-                })?;
++            let (snapshot, staged, source) = prepare_file(runtime, patch).map_err(|error| {
++                invalid(format!(
++                    "cannot prepare {path}: {error}; no files were written"
++                ))
++            })?;
++            if let Some(source) = source {
++                sources.insert(path, source);
++            }
++            let finished = if staged.needs_other_files() {
++                deferred.push((prepared.len(), staged));
++                None
++            } else {
++                Some(finish(staged, &sources)?)
++            };
+             snapshot_bytes =
+                 snapshot_bytes.saturating_add(snapshot.content.as_ref().map_or(0, Vec::len));
+             if snapshot_bytes > MAX_EDIT_BYTES {
+@@ -162,14 +193,24 @@ impl ExecutionService {
+                     "input snapshots exceed 16 MiB per call; split the batch",
+                 ));
+             }
+-            total_bytes = total_bytes.saturating_add(replacement.content.len());
+-            if total_bytes > MAX_EDIT_BYTES {
+-                return Err(ExecutionError::Arguments(
+-                    "edited content exceeds 16 MiB per call".into(),
+-                ));
++            if let Some((replacement, _)) = &finished {
++                add_content(&replacement.content)?;
+             }
+-            prepared.push((snapshot, replacement, after_sha256, notes));
++            prepared.push((snapshot, finished));
++        }
++        for (index, staged) in deferred {
++            let finished = finish(staged, &sources)?;
++            add_content(&finished.0.content)?;
++            prepared[index].1 = Some(finished);
+         }
++        let prepared = prepared
++            .into_iter()
++            .map(|(snapshot, finished)| {
++                let (replacement, notes) = finished.expect("every file is finished");
++                let after_sha256 = content_sha256(replacement.content.as_bytes());
++                (snapshot, replacement, after_sha256, notes)
++            })
++            .collect::<Vec<_>>();
+         let mut results = Vec::new();
+         for (snapshot, replacement, after_sha256, notes) in prepared {
+             let path = replacement.path.clone();
+diff --git a/crates/execution/src/lib.rs b/crates/execution/src/lib.rs
+index 0754b9d..7fdaa47 100644
+--- a/crates/execution/src/lib.rs
++++ b/crates/execution/src/lib.rs
+@@ -75,34 +75,137 @@ impl ApplyPatchArgs {
+     }
+ 
+     /// The replacement, and a note for every line edit whose range was moved.
++    #[cfg(test)]
+     fn into_replacement_with_notes(
+         self,
+         snapshot: &[u8],
+     ) -> Result<(FileReplacement, Vec<String>), ExecutionError> {
++        let path = self.path.clone();
++        let (staged, source) = self.stage(snapshot)?;
++        let sources = source
++            .map(|source| BTreeMap::from([(path, source)]))
++            .unwrap_or_default();
++        staged.finish(&sources)
++    }
++
++    /// Place this file's edits on its unedited text without applying them, and
++    /// return the lines its verified selections cover (experiment-only,
++    /// `lines_anchored`), so `@@ref` lines in any file of the call can reuse them.
++    fn stage(self, snapshot: &[u8]) -> Result<(StagedFile, Option<RefSource>), ExecutionError> {
+         self.validate_shape()?;
+-        let (content, notes) = if let Some(content) = self.content {
+-            (content, Vec::new())
++        let (edits, source) = if let Some(content) = self.content {
++            (StagedEdits::Content(content), None)
+         } else {
+             let content = String::from_utf8(snapshot.to_vec()).map_err(|_| {
+                 ExecutionError::Arguments("text edits require an existing UTF-8 text file".into())
+             })?;
+-            apply_file_edits(content, self.edits)?
++            stage_file_edits(content, self.edits)?
+         };
+-        let replacement = FileReplacement {
++        let staged = StagedFile {
+             path: self.path,
+             expected_sha256: self
+                 .expected_sha256
+                 .filter(|value| !value.eq_ignore_ascii_case("null")),
++            edits,
++        };
++        Ok((staged, source))
++    }
++}
++
++/// One file of an editing call, its edits placed on the unedited text.
++struct StagedFile {
++    path: String,
++    expected_sha256: Option<String>,
++    edits: StagedEdits,
++}
++
++enum StagedEdits {
++    /// Whole-file content, which may hold `@@ref path:A-B@@` lines.
++    Content(String),
++    /// Exact-text edits, already applied.
++    Applied(String),
++    /// Line edits placed on the unedited file and applied by `finish`.
++    Lines {
++        content: String,
++        placed: Vec<PlacedEdit>,
++        notes: Vec<String>,
++    },
++}
++
++/// Placed range, new text, whether anchored (verified), and the stated range.
++type PlacedEdit = (usize, usize, String, bool, (usize, usize));
++
++/// Experiment-only (`lines_anchored`): the original lines of one file in a call
++/// and its verified selections, stated range -> placed range and shift.
++struct RefSource {
++    lines: Vec<String>,
++    selections: BTreeMap<(usize, usize), (usize, usize, isize)>,
++}
++
++impl StagedFile {
++    fn path(&self) -> &str {
++        &self.path
++    }
++
++    /// Whether a `@@ref` line names another file, so this file can be finished
++    /// only once every file of the call is staged.
++    fn needs_other_files(&self) -> bool {
++        let names_a_file = |text: &str| {
++            text.lines()
++                .any(|line| matches!(ref_marker(line), Some((_, Some(_), ..))))
++        };
++        match &self.edits {
++            StagedEdits::Applied(_) => false,
++            StagedEdits::Content(content) => content.lines().any(|line| ref_marker(line).is_some()),
++            StagedEdits::Lines { placed, .. } => placed
++                .iter()
++                .any(|(_, _, new_text, anchored, _)| *anchored && names_a_file(new_text)),
++        }
++    }
++
++    /// Expand `@@ref` lines against the verified selections of the call, then
++    /// apply the placed line edits bottom-up.
++    fn finish(
++        self,
++        sources: &BTreeMap<String, RefSource>,
++    ) -> Result<(FileReplacement, Vec<String>), ExecutionError> {
++        let (content, notes) = match self.edits {
++            StagedEdits::Applied(content) => (content, Vec::new()),
++            // Content is used as sent unless the call made a verified selection,
++            // which only `lines_anchored` edits make.
++            StagedEdits::Content(content) if sources.is_empty() => (content, Vec::new()),
++            StagedEdits::Content(content) => {
++                let (content, referenced) = expand_refs(None, sources, &content)?;
++                let notes = referenced
++                    .into_iter()
++                    .map(|(other, from, to)| {
++                        format!(
++                            "content took the original lines {from}-{to} of {} from @@ref",
++                            other.unwrap_or_default()
++                        )
++                    })
++                    .collect();
++                (content, notes)
++            }
++            StagedEdits::Lines {
++                content,
++                placed,
++                notes,
++            } => apply_placed_edits(content, placed, notes, &self.path, sources)?,
++        };
++        let replacement = FileReplacement {
++            path: self.path,
++            expected_sha256: self.expected_sha256,
+             content,
+         };
+         Ok((replacement, notes))
+     }
+ }
+ 
+-fn apply_file_edits(
++fn stage_file_edits(
+     mut content: String,
+     edits: Vec<FileEdit>,
+-) -> Result<(String, Vec<String>), ExecutionError> {
++) -> Result<(StagedEdits, Option<RefSource>), ExecutionError> {
+     let line_mode = edits.iter().all(|edit| {
+         edit.old_text.is_none() && edit.start_line.is_some() && edit.end_line.is_some()
+     });
+@@ -169,14 +272,15 @@ fn apply_file_edits(
+             }
+             content.replace_range(positions[0]..positions[0] + old_text.len(), &edit.new_text);
+         }
+-        return Ok((content, Vec::new()));
++        return Ok((StagedEdits::Applied(content), None));
+     }
+ 
+     // Place every range on the unedited file before replacing anything.
+-    let lines: Vec<&str> = content
++    let owned: Vec<String> = content
+         .split_inclusive('\n')
+-        .map(|line| line.trim_end_matches(['\n', '\r']))
++        .map(|line| line.trim_end_matches(['\n', '\r']).to_owned())
+         .collect();
++    let lines: Vec<&str> = owned.iter().map(String::as_str).collect();
+     // An empty file still has one (empty) line to replace.
+     let line_count = lines.len().max(1);
+     let mut placed = Vec::new();
+@@ -210,9 +314,31 @@ fn apply_file_edits(
+         }
+         placed.push((start, end, edit.new_text, anchored, (start_line, end_line)));
+     }
+-    // Experiment-only (`lines_anchored`): once every selection is placed, a
+-    // `@@ref A-B@@` line in an anchored edit's new_text becomes the original
+-    // text of lines A-B, which must lie inside a selection of this call.
++    let source = (!selections.is_empty()).then_some(RefSource {
++        lines: owned,
++        selections,
++    });
++    Ok((
++        StagedEdits::Lines {
++            content,
++            placed,
++            notes,
++        },
++        source,
++    ))
++}
++
++fn apply_placed_edits(
++    mut content: String,
++    placed: Vec<PlacedEdit>,
++    mut notes: Vec<String>,
++    path: &str,
++    sources: &BTreeMap<String, RefSource>,
++) -> Result<(String, Vec<String>), ExecutionError> {
++    // Experiment-only (`lines_anchored`): once every selection of the call is
++    // placed, a `@@ref A-B@@` line in an anchored edit's new_text becomes the
++    // original text of lines A-B, which must lie inside a selection of this
++    // call: in this file, or in the file that `@@ref path:A-B@@` names.
+     let mut placed = placed
+         .into_iter()
+         .map(
+@@ -220,11 +346,16 @@ fn apply_file_edits(
+                 if !anchored {
+                     return Ok((start, end, new_text));
+                 }
+-                let (new_text, referenced) = expand_refs(&lines, &selections, &new_text)?;
+-                for (from, to) in referenced {
+-                    notes.push(format!(
+-                    "line edit {stated_start}-{stated_end} took the original lines {from}-{to} from @@ref"
+-                ));
++                let (new_text, referenced) = expand_refs(Some(path), sources, &new_text)?;
++                for (other, from, to) in referenced {
++                    notes.push(match other {
++                        None => format!(
++                            "line edit {stated_start}-{stated_end} took the original lines {from}-{to} from @@ref"
++                        ),
++                        Some(other) => format!(
++                            "line edit {stated_start}-{stated_end} took the original lines {from}-{to} of {other} from @@ref"
++                        ),
++                    });
+                 }
+                 Ok((start, end, new_text))
+             },
+@@ -261,35 +392,70 @@ fn apply_file_edits(
+ /// indentation becomes the marker line's; blank lines stay blank. A-B is in
+ /// the model's numbering and must lie inside the stated range of a selection
+ /// in the same call, whose anchors verify it; when that selection was placed
+-/// by a uniform shift, A-B moves with it. Returns the text and the lines referenced.
++/// by a uniform shift, A-B moves with it. `@@ref path:A-B@@` takes the lines
++/// from a selection in another file of the call, the only form whole-file
++/// content may use (`own_path` is then None). Returns the text and, per
++/// reference, the other file (None for this one) and the lines referenced.
++#[allow(clippy::type_complexity)]
+ fn expand_refs(
+-    lines: &[&str],
+-    selections: &BTreeMap<(usize, usize), (usize, usize, isize)>,
++    own_path: Option<&str>,
++    sources: &BTreeMap<String, RefSource>,
+     new_text: &str,
+-) -> Result<(String, Vec<(usize, usize)>), ExecutionError> {
++) -> Result<(String, Vec<(Option<String>, usize, usize)>), ExecutionError> {
+     let mut out = String::with_capacity(new_text.len());
+     let mut referenced = Vec::new();
+     for piece in new_text.split_inclusive('\n') {
+-        let Some((indent, from, to)) = ref_marker(piece.trim_end_matches(['\n', '\r'])) else {
++        let Some((indent, named, from, to)) = ref_marker(piece.trim_end_matches(['\n', '\r']))
++        else {
+             out.push_str(piece);
+             continue;
+         };
+-        let inside = selections
+-            .iter()
+-            .find(|&(&(first, last), _)| first <= from && from <= to && to <= last);
+-        let Some((_, &(placed_start, placed_end, shift))) = inside else {
+-            return Err(ExecutionError::Arguments(format!(
+-                "@@ref {from}-{to}@@ is not inside the start_line-end_line of any edit in this call; select the lines to reference with an edit in the same call"
+-            )));
++        let other = match named {
++            Some(named) => {
++                let named = normalized_ref_path(named).ok_or_else(|| {
++                    ExecutionError::Arguments(format!(
++                        "@@ref {named}:{from}-{to}@@ must name a relative path without parent traversal"
++                    ))
++                })?;
++                (Some(named.as_str()) != own_path).then_some(named)
++            }
++            None if own_path.is_some() => None,
++            None => {
++                return Err(ExecutionError::Arguments(format!(
++                    "@@ref {from}-{to}@@ in content must name the file whose lines it takes: @@ref path:{from}-{to}@@"
++                )));
++            }
++        };
++        let marker = match &other {
++            Some(other) => format!("@@ref {other}:{from}-{to}@@"),
++            None => format!("@@ref {from}-{to}@@"),
++        };
++        let source_path = other.as_deref().or(own_path).unwrap_or_default();
++        let inside = sources.get(source_path).and_then(|source| {
++            source
++                .selections
++                .iter()
++                .find(|&(&(first, last), _)| first <= from && from <= to && to <= last)
++                .map(|(_, &placed)| (source, placed))
++        });
++        let Some((source, (placed_start, placed_end, shift))) = inside else {
++            return Err(ExecutionError::Arguments(match &other {
++                None => format!(
++                    "@@ref {from}-{to}@@ is not inside the start_line-end_line of any edit in this call; select the lines to reference with an edit in the same call"
++                ),
++                Some(other) => format!(
++                    "{marker} is not inside the start_line-end_line of any edit to {other} in this call; select the lines to reference with an edit to {other} in the same call"
++                ),
++            }));
+         };
+         let (start, end) = (from as isize + shift, to as isize + shift);
+         if start < placed_start as isize || end > placed_end as isize {
+             return Err(ExecutionError::Arguments(format!(
+-                "@@ref {from}-{to}@@ falls outside lines {placed_start}-{placed_end}, where its selection was applied"
++                "{marker} falls outside lines {placed_start}-{placed_end}, where its selection was applied"
+             )));
+         }
+         let (start, end) = (start as usize, end as usize);
+-        let block = &lines[start - 1..end];
++        let block = &source.lines[start - 1..end];
+         let leading = |line: &str| line.len() - line.trim_start().len();
+         let base = block
+             .iter()
+@@ -312,27 +478,46 @@ fn expand_refs(
+         if !piece.ends_with('\n') {
+             out.pop();
+         }
+-        referenced.push((start, end));
++        referenced.push((other, start, end));
+     }
+     Ok((out, referenced))
+ }
+ 
+-/// `(indentation, A, B)` for a line that is exactly `@@ref A-B@@` after its
+-/// indentation.
+-fn ref_marker(line: &str) -> Option<(&str, usize, usize)> {
++/// `(indentation, file, A, B)` for a line that is exactly `@@ref A-B@@`, or
++/// `@@ref path:A-B@@` naming a file, after its indentation.
++fn ref_marker(line: &str) -> Option<(&str, Option<&str>, usize, usize)> {
+     let trimmed = line.trim_start();
+     let inner = trimmed
+         .trim_end()
+         .strip_prefix("@@ref ")?
+-        .strip_suffix("@@")?;
+-    let (from, to) = inner.trim().split_once('-')?;
++        .strip_suffix("@@")?
++        .trim();
++    let (named, range) = match inner.rsplit_once(':') {
++        Some((named, range)) => (Some(named.trim()), range),
++        None => (None, inner),
++    };
++    let (from, to) = range.split_once('-')?;
+     Some((
+         &line[..line.len() - trimmed.len()],
++        named,
+         from.trim().parse().ok()?,
+         to.trim().parse().ok()?,
+     ))
+ }
+ 
++/// A `@@ref path:A-B@@` path in the form editing paths are compared in.
++fn normalized_ref_path(path: &str) -> Option<String> {
++    let mut parts = Vec::new();
++    for component in std::path::Path::new(path).components() {
++        match component {
++            std::path::Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
++            std::path::Component::CurDir => {}
++            _ => return None,
++        }
++    }
++    (!parts.is_empty()).then(|| parts.join("/"))
++}
++
+ /// Experiment-only (`lines_anchored`): the range a line edit replaces, the
+ /// uniform shift of the model's numbering it implies (0 unless both boundary
+ /// lines moved by the same amount), and why the range differs from the stated one. The line numbers say roughly where; the model's
+@@ -2077,6 +2262,126 @@ mod tests {
+         }
+     }
+ 
++    /// Experiment-only (`lines_anchored`): `@@ref path:A-B@@` moves lines
++    /// selected in one file into another file's edit or a new file's content.
++    #[tokio::test]
++    async fn anchored_refs_move_selected_lines_across_files() {
++        let a = "import os\n\n\ndef helper(x):\n    if x:\n        return 1\n    return 2\n\n\ndef main():\n    return helper(3)\n";
++        let b = "class Tools:\n    pass\n";
++        let revision = |text: &str| content_sha256(text.as_bytes())[..16].to_string();
++        let select_helper = json!({"path":"a.py","expected_revision":revision(a),"edits":[
++            {"start_line":1,"end_line":1,"first_line":"import os","last_line":"import os","new_text":"import os\nfrom b import Tools\n"},
++            {"start_line":4,"end_line":7,"first_line":"def helper(x):","last_line":"    return 2","new_text":""}]});
++        let into_class = |reference: &str| {
++            json!({"path":"b.py","expected_revision":revision(b),"edits":[
++            {"start_line":2,"end_line":2,"first_line":"    pass","last_line":"    pass","new_text":format!("    @staticmethod\n    {reference}\n")}]})
++        };
++        let setup = || async {
++            let (dir, service, session) = service().await;
++            fs::write(dir.path().join("a.py"), a).unwrap();
++            fs::write(dir.path().join("b.py"), b).unwrap();
++            (dir, service, session)
++        };
++
++        // The files that refer to a.py come first, so they wait for its selection.
++        let (dir, service, session) = setup().await;
++        let outcome = approve_edit(
++            &service,
++            &session,
++            json!({"files":[
++            into_class("@@ref a.py:4-7@@"),
++            {"path":"c.py","expected_revision":null,"content":"@@ref ./a.py:5-7@@\n"},
++            select_helper.clone()]}),
++        )
++        .await;
++        let ToolCallOutcome::Completed { tool_call } = outcome else {
++            panic!("{outcome:?}")
++        };
++        let read = |name: &str| fs::read_to_string(dir.path().join(name)).unwrap();
++        assert_eq!(
++            read("a.py"),
++            "import os\nfrom b import Tools\n\n\n\n\ndef main():\n    return helper(3)\n"
++        );
++        assert_eq!(
++            read("b.py"),
++            "class Tools:\n    @staticmethod\n    def helper(x):\n        if x:\n            return 1\n        return 2\n"
++        );
++        assert_eq!(read("c.py"), "if x:\n    return 1\nreturn 2\n");
++        let result = tool_call.result.unwrap();
++        let notes = |index: usize| result["files"][index]["notes"].to_string();
++        assert!(
++            notes(0).contains("line edit 2-2 took the original lines 4-7 of a.py from @@ref"),
++            "{result}"
++        );
++        assert!(
++            notes(1).contains("content took the original lines 5-7 of a.py from @@ref"),
++            "{result}"
++        );
++
++        // A reference the call cannot verify fails the whole call before any write.
++        for (reference, expected) in [
++            (
++                "@@ref z.py:4-7@@",
++                "@@ref z.py:4-7@@ is not inside the start_line-end_line of any edit to z.py",
++            ),
++            (
++                "@@ref a.py:8-9@@",
++                "@@ref a.py:8-9@@ is not inside the start_line-end_line of any edit to a.py",
++            ),
++            (
++                "@@ref ../a.py:4-7@@",
++                "must name a relative path without parent traversal",
++            ),
++            (
++                "@@ref 4-7@@",
++                "@@ref 4-7@@ is not inside the start_line-end_line of any edit in this call",
++            ),
++        ] {
++            let (dir, service, session) = setup().await;
++            let outcome = approve_edit(
++                &service,
++                &session,
++                json!({"files":[into_class(reference), select_helper.clone()]}),
++            )
++            .await;
++            let message = format!("{outcome:?}");
++            assert!(
++                matches!(outcome, ToolCallOutcome::Failed { .. }),
++                "{message}"
++            );
++            assert!(
++                message.contains(expected) && message.contains("no files were written"),
++                "{message}"
++            );
++            assert_eq!(fs::read_to_string(dir.path().join("a.py")).unwrap(), a);
++            assert_eq!(fs::read_to_string(dir.path().join("b.py")).unwrap(), b);
++        }
++        let (dir, service, session) = setup().await;
++        let outcome = approve_edit(&service, &session, json!({"files":[
++            {"path":"c.py","expected_revision":null,"content":"@@ref 5-7@@\n"}, select_helper.clone()]})).await;
++        let message = format!("{outcome:?}");
++        assert!(
++            message
++                .contains("in content must name the file whose lines it takes: @@ref path:5-7@@"),
++            "{message}"
++        );
++        assert!(!dir.path().join("c.py").exists());
++
++        // Without a verified selection in the call, content is written as sent.
++        let (dir, service, session) = setup().await;
++        let outcome = approve_edit(&service, &session, json!({"files":[
++            {"path":"c.py","expected_revision":null,"content":"@@ref a.py:5-7@@\n"},
++            {"path":"b.py","expected_revision":revision(b),"edits":[{"start_line":2,"end_line":2,"new_text":"    x = 1\n"}]}]})).await;
++        assert!(
++            matches!(outcome, ToolCallOutcome::Completed { .. }),
++            "{outcome:?}"
++        );
++        assert_eq!(
++            fs::read_to_string(dir.path().join("c.py")).unwrap(),
++            "@@ref a.py:5-7@@\n"
++        );
++    }
++
+     #[tokio::test]
+     async fn batch_prevalidates_stale_denied_and_invalid_second_targets() {
+         for second in [

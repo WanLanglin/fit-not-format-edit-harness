@@ -1,0 +1,8 @@
+edits with a known fate: 3074 | matched once 2880 | matched 0 times 122 | matched 2+ times 72
+bench              aider-refactor  canitedit
+model                                       
+DeepSeek-V4-Flash               0        214
+GLM-5.3                         0        385
+GPT-5.6-luna                  633        840
+MiMo-v2.5-Pro                 297        363
+Qwen3.8-Flash                   0        342

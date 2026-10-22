@@ -1,0 +1,8 @@
+== all sizes: n=74  (refactor 53)
+  dup boundary line: 21  def/class without body: 41  both: 16  neither: 28
+  class: {'boundary_fixable': 46, 'error_in_written_text': 21, 'error_in_surrounding_code': 7}
+  class x bench: {('aider-refactor', 'boundary_fixable'): 32, ('aider-refactor', 'error_in_surrounding_code'): 3, ('aider-refactor', 'error_in_written_text'): 18, ('canitedit', 'boundary_fixable'): 14, ('canitedit', 'error_in_surrounding_code'): 4, ('canitedit', 'error_in_written_text'): 3}
+== >=200 tokens: n=52  (refactor 49)
+  dup boundary line: 9  def/class without body: 28  both: 7  neither: 22
+  class: {'boundary_fixable': 32, 'error_in_written_text': 18, 'error_in_surrounding_code': 2}
+  class x bench: {('aider-refactor', 'boundary_fixable'): 30, ('aider-refactor', 'error_in_surrounding_code'): 2, ('aider-refactor', 'error_in_written_text'): 17, ('canitedit', 'boundary_fixable'): 2, ('canitedit', 'error_in_written_text'): 1}

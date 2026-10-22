@@ -1,0 +1,4 @@
+first_targeted_ok  n=1090 LR=239.7 df=8 p=2.60e-47
+   deviance: models+tasks+interfaces 909.6 -> +interaction 669.9
+passed             n=1221 LR=10.4 df=8 p=2.39e-01
+   deviance: models+tasks+interfaces 420.9 -> +interaction 410.5

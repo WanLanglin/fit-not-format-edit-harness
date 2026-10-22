@@ -1,0 +1,9 @@
+canitedit       GPT-5.6-luna       tasks  82 | success 0.756 / 0.780 / 0.805 | p 0.336 | first edit 0.93 / 0.23 / 0.99 | output/task (k) 1.1 / 1.5 / 1.3
+canitedit       GLM-5.3            tasks  82 | success 0.817 / 0.793 / 0.768 | p 0.301 | first edit 0.97 / 0.89 / 0.96 | output/task (k) 11.2 / 11.9 / 11.8
+canitedit       DeepSeek-V4-Flash  tasks  82 | success 0.732 / 0.683 / 0.659 | p 0.211 | first edit 0.84 / 0.25 / 0.90 | output/task (k) 4.5 / 5.2 / 4.4
+canitedit       MiMo-v2.5-Pro      tasks  82 | success 0.780 / 0.817 / 0.829 | p 0.307 | first edit 0.93 / 0.16 / 0.87 | output/task (k) 1.6 / 2.1 / 1.6
+canitedit       Qwen3.8-Flash      tasks  79 | success 0.823 / 0.861 / 0.848 | p 0.417 | first edit 0.66 / 0.86 / 0.45 | output/task (k) 7.4 / 8.4 / 8.0
+canitedit       Claude-Sonnet-5    tasks  80 | success 0.787 / -- / 0.825 | p 0.375 (McNemar) | first edit 0.92 / -- / 1.00 | output/task (k) 2.3 / -- / 2.2
+aider-refactor  GPT-5.6-luna       tasks  89 | success 0.944 / 0.944 / 0.944 | p 1.000 | first edit 0.58 / 0.33 / 0.99 | output/task (k) 4.3 / 4.5 / 2.5
+aider-refactor  MiMo-v2.5-Pro      tasks  88 | success 0.932 / 0.841 / 0.841 | p 0.093 | first edit 0.76 / 0.19 / 0.80 | output/task (k) 4.3 / 8.7 / 3.6
+runs behind this table: 1928, of which invalid (provider or harness failure): 7

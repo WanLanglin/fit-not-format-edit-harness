@@ -1,0 +1,15 @@
+bench,model,measure,tasks,ratio
+aider-refactor,GPT-5.6-luna,cost,67,1.6685553923580616
+aider-refactor,GPT-5.6-luna,output,67,2.2016474596882905
+aider-refactor,MiMo-v2.5-Pro,cost,68,1.834469638252767
+aider-refactor,MiMo-v2.5-Pro,output,68,2.1621416029719014
+canitedit,DeepSeek-V4-Flash,cost,51,1.355637304227386
+canitedit,DeepSeek-V4-Flash,output,51,1.2835166955708557
+canitedit,GLM-5.3,cost,13,1.2097431638898226
+canitedit,GLM-5.3,output,13,1.013318137414523
+canitedit,GPT-5.6-luna,cost,64,1.4333365361378256
+canitedit,GPT-5.6-luna,output,64,1.4227043731172744
+canitedit,MiMo-v2.5-Pro,cost,46,1.325030765164455
+canitedit,MiMo-v2.5-Pro,output,46,1.4838500300107482
+canitedit,Qwen3.8-Flash,cost,52,1.1932837628719273
+canitedit,Qwen3.8-Flash,output,52,1.1072483793676227

@@ -1,0 +1,12 @@
+refactor        GPT-5.6-luna   first  ref vs text: tasks favouring ref 33, favouring text 10, task-level sign test p=0.0006
+refactor        GPT-5.6-luna   broken lines vs ref: tasks favouring lines 15, favouring ref 4, task-level sign test p=0.0192
+refactor        GPT-5.6-luna   passed ref vs lines: tasks favouring ref 6, favouring lines 2, task-level sign test p=0.2891
+refactor        GPT-5.6-luna   passed ref vs text: tasks favouring ref 5, favouring text 3, task-level sign test p=0.7266
+refactor        MiMo-v2.5-Pro  first  ref vs text: tasks favouring ref 20, favouring text 30, task-level sign test p=0.2026
+refactor        MiMo-v2.5-Pro  broken lines vs ref: tasks favouring lines 48, favouring ref 2, task-level sign test p=0.0000
+refactor        MiMo-v2.5-Pro  passed ref vs lines: tasks favouring ref 20, favouring lines 4, task-level sign test p=0.0015
+refactor        MiMo-v2.5-Pro  passed ref vs text: tasks favouring ref 9, favouring text 7, task-level sign test p=0.8036
+canitedit       GPT-5.6-luna   first  ref vs text: tasks favouring ref 5, favouring text 7, task-level sign test p=0.7744
+canitedit       GPT-5.6-luna   broken lines vs ref: tasks favouring lines 5, favouring ref 3, task-level sign test p=0.7266
+canitedit       GPT-5.6-luna   passed ref vs lines: tasks favouring ref 6, favouring lines 3, task-level sign test p=0.5078
+canitedit       GPT-5.6-luna   passed ref vs text: tasks favouring ref 11, favouring text 2, task-level sign test p=0.0225

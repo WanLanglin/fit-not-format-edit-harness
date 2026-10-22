@@ -1,0 +1,6 @@
+replayed first targeted calls 2339 | replay disagrees with the harness on 11
+search/replace edits with a known match outcome 3074
+text   < 200: clean 872 of 913 (0.955) | >= 200 (251): rejected 12.0%, applied and broken 2.0%
+patch  < 200: clean 276 of 288 (0.958) | >= 200 (89): rejected 9.0%, applied and broken 3.4%
+lines  < 200: clean 510 of 539 (0.946) | >= 200 (259): rejected 1.2%, applied and broken 20.1%
+broken first line-range edits, all sizes: 74

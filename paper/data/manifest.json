@@ -1,0 +1,146 @@
+[
+ {
+  "directory": "canitedit-luna-4arms",
+  "batch": "main",
+  "valid_runs": {
+   "choice": 82,
+   "lines": 82,
+   "patch": 82,
+   "text": 82
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "canitedit-luna-guided",
+  "batch": "main",
+  "valid_runs": {
+   "guided": 82
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "canitedit-luna-tools-ablation",
+  "batch": "ablation",
+  "valid_runs": {
+   "choice": 82,
+   "guided": 82,
+   "text": 82,
+   "tools": 82,
+   "tools_guided": 82
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "canitedit-glm-3formats",
+  "batch": "main",
+  "valid_runs": {
+   "lines": 82,
+   "patch": 82,
+   "text": 82
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "canitedit-glm-choice",
+  "batch": "main",
+  "valid_runs": {
+   "choice": 82
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "canitedit-glm-guided",
+  "batch": "main",
+  "valid_runs": {
+   "guided": 82
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "canitedit-deepseek-4arms",
+  "batch": "main",
+  "valid_runs": {
+   "choice": 82,
+   "lines": 82,
+   "patch": 82,
+   "text": 82
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "canitedit-deepseek-guided",
+  "batch": "main",
+  "valid_runs": {
+   "guided": 82
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "canitedit-mimo-7arms",
+  "batch": "main",
+  "valid_runs": {
+   "choice": 82,
+   "guided": 81,
+   "lines": 82,
+   "patch": 82,
+   "text": 82,
+   "tools": 82,
+   "tools_guided": 82
+  },
+  "excluded_invalid": {
+   "guided": 1
+  }
+ },
+ {
+  "directory": "canitedit-qwen-5arms",
+  "batch": "main",
+  "valid_runs": {
+   "lines": 82,
+   "patch": 79,
+   "text": 82,
+   "tools": 81,
+   "tools_guided": 80
+  },
+  "excluded_invalid": {
+   "patch": 3,
+   "tools": 1,
+   "tools_guided": 2
+  }
+ },
+ {
+  "directory": "refactor-luna-5arms",
+  "batch": "main",
+  "valid_runs": {
+   "choice": 89,
+   "guided": 89,
+   "lines": 89,
+   "patch": 89,
+   "text": 89
+  },
+  "excluded_invalid": {}
+ },
+ {
+  "directory": "refactor-mimo-3arms",
+  "batch": "main",
+  "valid_runs": {
+   "lines": 89,
+   "patch": 88,
+   "text": 89
+  },
+  "excluded_invalid": {
+   "patch": 1
+  }
+ },
+ {
+  "directory": "canitedit-claude-sonnet5-2arms",
+  "batch": "claude",
+  "valid_runs": {
+   "lines": 80,
+   "text": 81
+  },
+  "excluded_invalid": {
+   "lines": 2,
+   "text": 1
+  }
+ }
+]

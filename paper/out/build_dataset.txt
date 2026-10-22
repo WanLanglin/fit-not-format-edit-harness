@@ -1,0 +1,15 @@
+runs.csv 3489 rows; edit_calls.csv 7016 rows
+unclassified errors: 66
+  canitedit-luna-4arms               main      {'choice': 82, 'lines': 82, 'patch': 82, 'text': 82}  excluded -
+  canitedit-luna-guided              main      {'guided': 82}  excluded -
+  canitedit-luna-tools-ablation      ablation  {'choice': 82, 'guided': 82, 'text': 82, 'tools': 82, 'tools_guided': 82}  excluded -
+  canitedit-glm-3formats             main      {'lines': 82, 'patch': 82, 'text': 82}  excluded -
+  canitedit-glm-choice               main      {'choice': 82}  excluded -
+  canitedit-glm-guided               main      {'guided': 82}  excluded -
+  canitedit-deepseek-4arms           main      {'choice': 82, 'lines': 82, 'patch': 82, 'text': 82}  excluded -
+  canitedit-deepseek-guided          main      {'guided': 82}  excluded -
+  canitedit-mimo-7arms               main      {'choice': 82, 'guided': 81, 'lines': 82, 'patch': 82, 'text': 82, 'tools': 82, 'tools_guided': 82}  excluded {'guided': 1}
+  canitedit-qwen-5arms               main      {'lines': 82, 'patch': 79, 'text': 82, 'tools': 81, 'tools_guided': 80}  excluded {'patch': 3, 'tools': 1, 'tools_guided': 2}
+  refactor-luna-5arms                main      {'choice': 89, 'guided': 89, 'lines': 89, 'patch': 89, 'text': 89}  excluded -
+  refactor-mimo-3arms                main      {'lines': 89, 'patch': 88, 'text': 89}  excluded {'patch': 1}
+  canitedit-claude-sonnet5-2arms     claude    {'lines': 80, 'text': 81}  excluded {'lines': 2, 'text': 1}

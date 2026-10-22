@@ -1,0 +1,14 @@
+refactor  luna   P1       first calls  86 | exact  69 | blank edge  5 | misaddressed   7 (8.1%): would parse   1, would break   6, n/a 0 | other   5
+refactor  luna   P1+P2    first calls  86 | exact  66 | blank edge  5 | misaddressed  12 (14.0%): would parse   4, would break   8, n/a 0 | other   3
+refactor  luna   ours     first calls  85 | exact  70 | blank edge  2 | misaddressed  10 (11.8%): would parse   1, would break   9, n/a 0 | other   3
+refactor  luna   ours rep first calls  85 | exact  73 | blank edge  3 | misaddressed   9 (10.6%): would parse   0, would break   9, n/a 0 | other   0
+refactor  MiMo   P1       first calls  81 | exact  41 | blank edge 10 | misaddressed  16 (19.8%): would parse   6, would break  10, n/a 0 | other  14
+refactor  MiMo   P1+P2    first calls  79 | exact  42 | blank edge 10 | misaddressed  20 (25.3%): would parse  10, would break  10, n/a 0 | other   7
+refactor  MiMo   ours     first calls  83 | exact  46 | blank edge 10 | misaddressed  16 (19.3%): would parse   7, would break   9, n/a 0 | other  11
+refactor  MiMo   ours rep first calls  82 | exact  46 | blank edge  7 | misaddressed  17 (20.7%): would parse   8, would break   9, n/a 0 | other  12
+canitedit luna   ours     first calls  82 | exact  69 | blank edge  4 | misaddressed   7 (8.5%): would parse   3, would break   4, n/a 0 | other   2
+canitedit luna   ours rep first calls  81 | exact  70 | blank edge  5 | misaddressed   4 (4.9%): would parse   2, would break   2, n/a 0 | other   2
+canitedit MiMo   ours     first calls  68 | exact  55 | blank edge  2 | misaddressed  10 (14.7%): would parse   7, would break   3, n/a 0 | other   1
+canitedit Claude ours     first calls  82 | exact  78 | blank edge  1 | misaddressed   3 (3.7%): would parse   2, would break   1, n/a 0 | other   0
+REFACTOR TOTAL first calls 667 | blank edge 52 | misaddressed 107 (16.0%) | would parse 37 | would break 70 | n/a 0
+CANITEDIT TOTAL first calls 313 | blank edge 12 | misaddressed 24 (7.7%) | would parse 14 | would break 10 | n/a 0

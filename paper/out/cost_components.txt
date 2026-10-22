@@ -1,0 +1,16 @@
+aider-refactor / GPT-5.6-luna (85 tasks): per task under ideal prefix caching
+  text  model calls/task  14.2, mean context   6.3k | $0.0102 = re-read  15% + new input  34% + output  51%
+  lines model calls/task  13.9, mean context   5.8k | $0.0078 = re-read  17% + new input  44% + output  38%
+  ref   model calls/task  13.2, mean context   5.8k | $0.0074 = re-read  17% + new input  43% + output  40%
+aider-refactor / MiMo-v2.5-Pro (85 tasks): per task under ideal prefix caching
+  text  model calls/task  11.7, mean context   7.1k | $0.0095 = re-read   3% + new input  59% + output  38%
+  lines model calls/task  12.4, mean context   7.3k | $0.0091 = re-read   3% + new input  63% + output  34%
+  ref   model calls/task  10.0, mean context   7.0k | $0.0079 = re-read   3% + new input  64% + output  33%
+canitedit / GPT-5.6-luna (81 tasks): per task under ideal prefix caching
+  text  model calls/task   5.0, mean context   1.8k | $0.0021 = re-read   6% + new input  28% + output  66%
+  lines model calls/task   5.1, mean context   1.8k | $0.0022 = re-read   6% + new input  25% + output  69%
+  ref   model calls/task   5.1, mean context   2.0k | $0.0023 = re-read   7% + new input  29% + output  64%
+canitedit / MiMo-v2.5-Pro (82 tasks): per task under ideal prefix caching
+  text  model calls/task   4.4, mean context   3.1k | $0.0033 = re-read   1% + new input  56% + output  43%
+  lines model calls/task   4.4, mean context   3.1k | $0.0032 = re-read   1% + new input  57% + output  42%
+  ref   model calls/task   4.4, mean context   3.3k | $0.0035 = re-read   1% + new input  57% + output  42%

@@ -1,0 +1,24 @@
+reference: codex-cli 0.156.0
+DeepSeek-V4-Flash  runs  64 | first patch accepted by us  16 (0.25) | rejected by us  48, of which the reference applies  19 -> reference acceptance 0.55
+      patch: sent without revisions                        rejected by us  19 | reference applies  12
+      patch: missing Begin/End markers                     rejected by us  14 | reference applies   0
+      argument shape                                       rejected by us  10 | reference applies   4
+      patch: malformed hunk                                rejected by us   2 | reference applies   2
+      patch: context-only hunk                             rejected by us   1 | reference applies   0
+      other                                                rejected by us   1 | reference applies   1
+GLM-5.3            runs  71 | first patch accepted by us  63 (0.89) | rejected by us   8, of which the reference applies   8 -> reference acceptance 1.00
+      patch: context-only hunk                             rejected by us   7 | reference applies   7
+      text: old_text matched 2+ times                      rejected by us   1 | reference applies   1
+GPT-5.6-luna       runs  82 | first patch accepted by us  19 (0.23) | rejected by us  63, of which the reference applies  12 -> reference acceptance 0.38
+      patch: duplicated envelope / unsupported operation   rejected by us  44 | reference applies   0
+      patch: context-only hunk                             rejected by us  11 | reference applies  10
+      patch: sent without revisions                        rejected by us   6 | reference applies   1
+      text: old_text matched 0 times                       rejected by us   1 | reference applies   1
+      patch: missing Begin/End markers                     rejected by us   1 | reference applies   0
+MiMo-v2.5-Pro      runs  56 | first patch accepted by us   9 (0.16) | rejected by us  47, of which the reference applies   1 -> reference acceptance 0.18
+      patch: non-bare @@ header                            rejected by us  25 | reference applies   1
+      patch: missing Begin/End markers                     rejected by us  22 | reference applies   0
+Qwen3.8-Flash      runs  78 | first patch accepted by us  67 (0.86) | rejected by us  11, of which the reference applies   4 -> reference acceptance 0.91
+      patch: missing Begin/End markers                     rejected by us   5 | reference applies   0
+      text: old_text matched 0 times                       rejected by us   3 | reference applies   1
+      patch: context-only hunk                             rejected by us   3 | reference applies   3

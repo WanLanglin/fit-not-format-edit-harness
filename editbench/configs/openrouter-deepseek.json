@@ -1,0 +1,23 @@
+{
+  "upstream": "https://openrouter.ai/api/v1",
+  "api_key_env": "EDITBENCH_OPENROUTER_API_KEY",
+  "upstream_timeout_seconds": 600,
+  "fetch_generation": true,
+  "generation_delay_seconds": 3,
+  "generation_attempts": 5,
+  "models": {
+    "deepseek/deepseek-v4-flash": {
+      "provider": {
+        "order": [
+          "open-inference"
+        ],
+        "allow_fallbacks": false,
+        "require_parameters": true
+      },
+      "drop_parameters": [],
+      "set_parameters": {
+        "top_p": 1.0
+      }
+    }
+  }
+}

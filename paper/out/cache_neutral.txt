@@ -1,0 +1,29 @@
+
+canitedit / GPT-5.6-luna: 81 tasks | prices $/M uncached 0.240 cached 0.021 output 1.210
+  lines    vs SR dollar efficiency: billed 1.01 [0.69,1.49] | neutral 1.01 [0.74,1.38] | ideal 1.00 [0.76,1.35]
+  aligned  vs SR dollar efficiency: billed 1.24 [1.01,1.54]* | neutral 1.12 [0.92,1.38] | ideal 1.09 [0.95,1.27]
+  ref      vs SR dollar efficiency: billed 1.37 [1.13,1.74]* | neutral 0.96 [0.79,1.20] | ideal 1.00 [0.85,1.18]
+  input share cached: billed text 37%, lines 38%, aligned 51%, ref 77% | reusable prefix (ideal) text 73%, lines 74%, aligned 71%, ref 74%
+
+canitedit / MiMo-v2.5-Pro: 82 tasks | prices $/M uncached 0.435 cached 0.004 output 0.870
+  lines    vs SR dollar efficiency: billed 1.20 [0.99,1.46] | neutral 1.05 [0.89,1.24] | ideal 1.08 [0.94,1.24]
+  aligned  vs SR dollar efficiency: billed 1.59 [1.36,1.88]* | neutral 0.99 [0.85,1.14] | ideal 1.05 [0.93,1.18]
+  ref      vs SR dollar efficiency: billed 1.54 [1.28,1.88]* | neutral 0.93 [0.78,1.12] | ideal 0.96 [0.84,1.09]
+  input share cached: billed text 55%, lines 63%, aligned 80%, ref 82% | reusable prefix (ideal) text 68%, lines 69%, aligned 70%, ref 69%
+
+aider-refactor / GPT-5.6-luna: 84 tasks | prices $/M uncached 0.250 cached 0.020 output 1.200
+  lines    vs SR dollar efficiency: billed 1.26 [0.99,1.61] | neutral 1.22 [0.97,1.52] | ideal 1.34 [1.13,1.60]*
+  aligned  vs SR dollar efficiency: billed 1.21 [0.95,1.52] | neutral 1.19 [0.98,1.48] | ideal 1.30 [1.11,1.54]*
+  ref      vs SR dollar efficiency: billed 1.54 [1.28,1.86]* | neutral 1.28 [1.09,1.52]* | ideal 1.41 [1.21,1.65]*
+  input share cached: billed text 18%, lines 20%, aligned 19%, ref 36% | reusable prefix (ideal) text 85%, lines 83%, aligned 84%, ref 84%
+
+aider-refactor / MiMo-v2.5-Pro: 85 tasks | prices $/M uncached 0.435 cached 0.004 output 0.870
+  lines    vs SR dollar efficiency: billed 0.87 [0.68,1.12] | neutral 0.86 [0.68,1.12] | ideal 0.96 [0.79,1.17]
+  aligned  vs SR dollar efficiency: billed 1.21 [0.93,1.63] | neutral 1.14 [0.90,1.51] | ideal 1.12 [0.94,1.39]
+  ref      vs SR dollar efficiency: billed 1.52 [1.16,2.03]* | neutral 1.22 [0.94,1.60] | ideal 1.20 [0.98,1.49]
+  input share cached: billed text 47%, lines 47%, aligned 50%, ref 58% | reusable prefix (ideal) text 85%, lines 86%, aligned 83%, ref 83%
+
+canitedit / Claude-Sonnet-5: 80 tasks | prices $/M uncached 2.000 cached 0.200 output 10.000
+  lines    vs SR dollar efficiency: billed 0.95 [0.77,1.17] | neutral 0.95 [0.78,1.17] | ideal 1.04 [0.84,1.30]
+  ref      vs SR dollar efficiency: billed 1.00 [0.85,1.20] | neutral 1.00 [0.84,1.20] | ideal 1.11 [0.93,1.34]
+  input share cached: billed text 0%, lines 0%, ref 0% | reusable prefix (ideal) text 75%, lines 79%, ref 76%

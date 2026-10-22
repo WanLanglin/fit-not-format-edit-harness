@@ -1,0 +1,11 @@
+paired tasks 80
+passed             SR 0.787  lines 0.825  lines vs SR +4/-1 p=0.375  (n=80)
+first_targeted_ok  SR 0.921  lines 1.000  lines vs SR +6/-0 p=0.031  (n=76)
+output/task (k): SR 2.3 lines 2.2
+lines vs SR efficiency per output: 1.09 [0.81, 1.47]
+lines vs SR efficiency per dollar: 0.95 [0.78, 1.17]
+Claude edit calls 200
+text first edit: accepted targeted 70 of 80, rejected 6, whole-file write first 4
+ref  first edit: accepted targeted 78 of 80, rejected 2, whole-file write first 0
+first  verified selection vs SR: 0.975 vs 0.875, +9/-1, exact McNemar p=0.021
+passed verified selection vs SR: 0.775 vs 0.787, +2/-3, exact McNemar p=1.000

@@ -1,0 +1,3634 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 00d9718..f85a13a 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -326,6 +326,7 @@ jobs:
+       - run: npm ci --prefix tests/benchmarks/runner --no-audit --no-fund
+       - run: python3 tests/test-harness-benchmark.py validate
+       - run: tests/test-harness-grader-integrity.sh
++      - run: python3 tests/benchmarks/harness/test_run.py
+       - if: needs.checks.outputs.audit == 'true'
+         run: npm audit --prefix tests/benchmarks/runner --audit-level=high
+ 
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index f5b7801..0891d37 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -32,3 +32,9 @@ Linux. It is a source-only Developer Preview.
+   encryption and diagnostic checks.
+ - Frozen benchmark fixtures and methodology, plus executable privacy/security
+   use cases.
++- A benchmark run collector that measures an S-Code binary on a frozen task
++  and records the grader outcome, provider-reported usage and timing. A run
++  is comparable only when its event lifecycle is bound to one turn, the turn
++  ran on the run's own isolated daemon, and every counted model call has
++  complete usage evidence; the daemon attributes usage to model calls and
++  publishes one `model.call.completed` record per call.
+diff --git a/crates/agent-core/src/lib.rs b/crates/agent-core/src/lib.rs
+index ff99aaf..4fd1400 100644
+--- a/crates/agent-core/src/lib.rs
++++ b/crates/agent-core/src/lib.rs
+@@ -383,9 +383,31 @@ pub enum AgentEvent {
+         call_id: String,
+         tool: String,
+     },
++    /// The final result of one tool call, including calls rejected before
++    /// execution. `arguments` is the raw model-supplied text.
++    ToolOutcome {
++        call_id: String,
++        tool: String,
++        arguments: String,
++        outcome: String,
++        error: Option<String>,
++    },
++    /// One provider usage object, attributed to the model call (1-based
++    /// within the turn) whose stream carried it.
+     Usage {
++        call: u32,
++        input_tokens: u64,
++        output_tokens: u64,
++    },
++    /// The final accounting state of one counted model call: how many usage
++    /// objects the provider streamed for it and their sums. Emitted for every
++    /// call the turn counts, including calls that failed or were cancelled.
++    ModelCallCompleted {
++        call: u32,
++        usage_events: u32,
+         input_tokens: u64,
+         output_tokens: u64,
++        outcome: ModelCallOutcome,
+     },
+     ModelRouteSelected {
+         model_id: String,
+@@ -404,6 +426,15 @@ pub enum AgentEvent {
+     },
+ }
+ 
++/// How a counted model call ended.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum ModelCallOutcome {
++    Completed,
++    Failed,
++    Cancelled,
++}
++
+ pub trait AgentObserver: Send + Sync {
+     fn emit(&self, event: AgentEvent);
+ }
+@@ -659,6 +690,7 @@ impl AgentRunner {
+             let stream_result = tokio::select! {
+                 () = cancellation.cancelled() => Err(AgentError::Cancelled),
+                 () = tokio::time::sleep_until(turn_deadline) => {
++                    self.emit_model_call_completed(model_calls, 0, 0, 0, ModelCallOutcome::Failed);
+                     materialize_pending_steps(&mut step_queue, &mut request.messages);
+                     return self.fail_run(
+                         &mut machine,
+@@ -673,6 +705,7 @@ impl AgentRunner {
+                     );
+                 }
+                 () = tokio::time::sleep(idle_timeout) => {
++                    self.emit_model_call_completed(model_calls, 0, 0, 0, ModelCallOutcome::Failed);
+                     materialize_pending_steps(&mut step_queue, &mut request.messages);
+                     return self.fail_run(
+                         &mut machine,
+@@ -691,6 +724,13 @@ impl AgentRunner {
+             let mut stream = match stream_result {
+                 Ok(stream) => stream,
+                 Err(AgentError::Cancelled) => {
++                    self.emit_model_call_completed(
++                        model_calls,
++                        0,
++                        0,
++                        0,
++                        ModelCallOutcome::Cancelled,
++                    );
+                     machine.transition(TurnStatus::Cancelled)?;
+                     self.emit_status(&machine, &mut journal);
+                     return Ok(result(
+@@ -704,12 +744,18 @@ impl AgentRunner {
+                         journal,
+                     ));
+                 }
+-                Err(error) => return Err(error),
++                Err(error) => {
++                    self.emit_model_call_completed(model_calls, 0, 0, 0, ModelCallOutcome::Failed);
++                    return Err(error);
++                }
+             };
+             request.messages = model_request.messages;
+             let mut text = String::new();
+             let mut calls: BTreeMap<u32, ToolCallBuilder> = BTreeMap::new();
+             let mut call_output_tokens = 0_u64;
++            let mut call_usage_events = 0_u32;
++            let mut call_input_tokens = 0_u64;
++            let mut call_output_total = 0_u64;
+             let mut finish_reason = None;
+             let idle_sleep = tokio::time::sleep(idle_timeout);
+             tokio::pin!(idle_sleep);
+@@ -718,6 +764,13 @@ impl AgentRunner {
+             loop {
+                 let event = tokio::select! {
+                     () = cancellation.cancelled() => {
++                        self.emit_model_call_completed(
++                            model_calls,
++                            call_usage_events,
++                            call_input_tokens,
++                            call_output_total,
++                            ModelCallOutcome::Cancelled,
++                        );
+                         preserve_partial_model_text(
+                             &mut text,
+                             &mut assistant_text,
+@@ -758,6 +811,13 @@ impl AgentRunner {
+                     break;
+                 };
+                 if cancellation.is_cancelled() {
++                    self.emit_model_call_completed(
++                        model_calls,
++                        call_usage_events,
++                        call_input_tokens,
++                        call_output_total,
++                        ModelCallOutcome::Cancelled,
++                    );
+                     preserve_partial_model_text(
+                         &mut text,
+                         &mut assistant_text,
+@@ -827,12 +887,16 @@ impl AgentRunner {
+                     } => {
+                         machine.record_usage(input, output)?;
+                         self.observer.emit(AgentEvent::Usage {
++                            call: model_calls,
+                             input_tokens: input,
+                             output_tokens: output,
+                         });
+                         input_tokens = input_tokens.saturating_add(input);
+                         output_tokens = output_tokens.saturating_add(output);
+                         call_output_tokens = call_output_tokens.max(output);
++                        call_usage_events = call_usage_events.saturating_add(1);
++                        call_input_tokens = call_input_tokens.saturating_add(input);
++                        call_output_total = call_output_total.saturating_add(output);
+                         journal.append(AgentOperation::UsageAdded {
+                             input_tokens: input,
+                             output_tokens: output,
+@@ -864,6 +928,17 @@ impl AgentRunner {
+                     }),
+                 }
+             }
++            self.emit_model_call_completed(
++                model_calls,
++                call_usage_events,
++                call_input_tokens,
++                call_output_total,
++                if stream_error.is_some() || stream_failure.is_some() {
++                    ModelCallOutcome::Failed
++                } else {
++                    ModelCallOutcome::Completed
++                },
++            );
+             if let Some(error) = stream_error {
+                 if text.is_empty()
+                     && calls.is_empty()
+@@ -1177,6 +1252,20 @@ impl AgentRunner {
+                 for (pending, tool_result) in outcomes {
+                     let call = pending.call;
+                     let fingerprint = pending.fingerprint;
++                    let (outcome, error) = match &tool_result {
++                        AgentToolResult::Completed { .. }
++                        | AgentToolResult::DiscoveredTools { .. } => ("completed", None),
++                        AgentToolResult::AwaitingInput { .. } => ("awaiting_input", None),
++                        AgentToolResult::AwaitingApproval { .. } => ("awaiting_approval", None),
++                        AgentToolResult::Failed { error } => ("failed", Some(error.clone())),
++                    };
++                    self.observer.emit(AgentEvent::ToolOutcome {
++                        call_id: call.id.clone(),
++                        tool: call.name.clone(),
++                        arguments: call.arguments.to_string(),
++                        outcome: outcome.into(),
++                        error,
++                    });
+                     match tool_result {
+                         AgentToolResult::Completed { value } => {
+                             failures.remove(&fingerprint);
+@@ -1284,6 +1373,23 @@ impl AgentRunner {
+         });
+     }
+ 
++    fn emit_model_call_completed(
++        &self,
++        call: u32,
++        usage_events: u32,
++        input_tokens: u64,
++        output_tokens: u64,
++        outcome: ModelCallOutcome,
++    ) {
++        self.observer.emit(AgentEvent::ModelCallCompleted {
++            call,
++            usage_events,
++            input_tokens,
++            output_tokens,
++            outcome,
++        });
++    }
++
+     #[allow(clippy::too_many_arguments)]
+     fn fail_run(
+         &self,
+@@ -2918,6 +3024,99 @@ mod tests {
+         assert!(result.assistant_text.contains("<tool_call>"));
+     }
+ 
++    #[tokio::test]
++    async fn every_counted_model_call_reports_its_usage_accounting() {
++        let provider = Arc::new(FakeProvider {
++            responses: Mutex::new(VecDeque::from([
++                vec![
++                    ModelEvent::Usage {
++                        input_tokens: 100,
++                        output_tokens: 0,
++                    },
++                    ModelEvent::ToolCallDelta {
++                        index: 0,
++                        id: Some("call-1".into()),
++                        name: Some("read_file".into()),
++                        arguments_delta: "{}".into(),
++                        provider_metadata: None,
++                    },
++                    ModelEvent::Usage {
++                        input_tokens: 0,
++                        output_tokens: 7,
++                    },
++                    ModelEvent::Completed {
++                        finish_reason: Some("tool_calls".into()),
++                    },
++                ],
++                vec![
++                    ModelEvent::TextDelta {
++                        text: "done".into(),
++                    },
++                    ModelEvent::Completed {
++                        finish_reason: Some("stop".into()),
++                    },
++                ],
++            ])),
++        });
++        let observer = Arc::new(RecordingObserver::default());
++        let result = AgentRunner::new(
++            provider,
++            Arc::new(FakeExecutor {
++                outcome: AgentToolResult::Completed { value: json!(null) },
++            }),
++            TurnLimits::default(),
++        )
++        .with_observer(observer.clone())
++        .run(request(), CancellationToken::new())
++        .await
++        .unwrap();
++
++        assert_eq!(result.status, AgentRunStatus::Completed);
++        assert_eq!(result.model_calls, 2);
++        assert_eq!((result.input_tokens, result.output_tokens), (100, 7));
++        let events = observer.events.lock().unwrap();
++        let usage = events
++            .iter()
++            .filter_map(|event| match event {
++                AgentEvent::Usage {
++                    call,
++                    input_tokens,
++                    output_tokens,
++                } => Some((*call, *input_tokens, *output_tokens)),
++                _ => None,
++            })
++            .collect::<Vec<_>>();
++        assert_eq!(usage, vec![(1, 100, 0), (1, 0, 7)]);
++        let completed = events
++            .iter()
++            .filter_map(|event| match event {
++                AgentEvent::ModelCallCompleted {
++                    call,
++                    usage_events,
++                    input_tokens,
++                    output_tokens,
++                    outcome,
++                } => Some((
++                    *call,
++                    *usage_events,
++                    *input_tokens,
++                    *output_tokens,
++                    *outcome,
++                )),
++                _ => None,
++            })
++            .collect::<Vec<_>>();
++        // The second call streamed no usage object: its record says so
++        // instead of being silently absent or zeroed into the total.
++        assert_eq!(
++            completed,
++            vec![
++                (1, 2, 100, 7, ModelCallOutcome::Completed),
++                (2, 0, 0, 0, ModelCallOutcome::Completed),
++            ]
++        );
++    }
++
+     #[tokio::test]
+     async fn nonempty_truncated_response_retries_with_more_output_room() {
+         struct CapturingProvider {
+diff --git a/crates/config/src/lib.rs b/crates/config/src/lib.rs
+index f4f9bd8..ad43ca7 100644
+--- a/crates/config/src/lib.rs
++++ b/crates/config/src/lib.rs
+@@ -655,6 +655,10 @@ pub enum EditingMode {
+     Lines,
+     Text,
+     Patch,
++    /// Experiment-only: offer lines, text and patch together.
++    Choice,
++    /// Experiment-only: `Choice` plus one short paragraph on when to use which form.
++    ChoiceGuided,
+ }
+ 
+ #[derive(Clone, Debug, Deserialize, Serialize)]
+@@ -2009,6 +2013,12 @@ mod tests {
+             effective.config.model.editing_overrides["my-model"],
+             EditingMode::Patch
+         );
++        std::fs::write(&path, "[model]\nediting_mode = \"choice\"\n").unwrap();
++        let effective = ConfigLoader::new()
++            .with_file(&path)
++            .load(Component::Daemon)
++            .unwrap();
++        assert_eq!(effective.config.model.editing_mode, EditingMode::Choice);
+         std::fs::write(&path, "[model]\nediting_mode = \"typo\"\n").unwrap();
+         assert!(
+             ConfigLoader::new()
+diff --git a/crates/daemon/src/editing.rs b/crates/daemon/src/editing.rs
+index 27e1063..a53e270 100644
+--- a/crates/daemon/src/editing.rs
++++ b/crates/daemon/src/editing.rs
+@@ -4,12 +4,82 @@ use serde_json::{Value, json};
+ use std::collections::BTreeMap;
+ 
+ const PROMPT_MARKER: &str = "S-Code editing format:\n";
++const LINES_INSTRUCTIONS: &str = "Use files with per-file path, expected_revision and edits containing start_line/end_line/new_text. Ranges are 1-based, inclusive, non-overlapping and refer to the original numbered_content. Never copy line-number prefixes into new_text.";
++const TEXT_INSTRUCTIONS: &str = "Use files with per-file path, expected_revision and edits containing old_text/new_text. Copy old_text exactly, including whitespace, with enough context to match once. Replacements within a file run in array order; later edits see earlier results.";
++const PATCH_INSTRUCTIONS: &str = "Use patch plus a revisions object keyed by every patch path. Supported syntax: *** Begin Patch, *** Add File: path or *** Update File: path, bare @@ before each update hunk, lines prefixed by space (context), - (remove), or + (add), and *** End Patch. Update hunks match exactly once in sequence, including trailing newlines; include existing context for insertions. No fuzzy matching, named/numbered @@ headers, Delete/Move operations or EOF markers. For files without trailing newlines or full replacements, use the files/content form instead.";
++const COMMON_INSTRUCTIONS: &str = "Read existing files first and copy each file's 16-character revision. Use JSON null only for a new file. A revision belongs to one file, not the batch. Batch known independent edits for up to 32 unique paths and 16 MiB total content. All edits are validated before any write; filesystem writes are sequential, not a cross-file transaction. On a partial failure inspect the reported applied paths and re-read before retrying; Turn undo records remain available. Use content for creation or deliberate whole-file replacement. The editing format does not change permissions, sandbox or approval requirements.";
++const TOOL_DESCRIPTION: &str = "Edit up to 32 workspace files with per-file revision checks. All files are validated before sequential writes; failures report applied paths. Follow the editing-format system instructions and this input schema.";
++// Experiment-only menu. Each form keeps its single-mode instructions verbatim.
++const CHOICE_PREAMBLE: &str = "Three input forms are available; choose one form per call. A patch call cannot also contain files, and one file cannot mix start_line/end_line edits with old_text edits.";
++// Experiment-only selection advice for the guided menu. Written from the three
++// interface contracts alone, before the guided arm ran, so it is not tuned on
++// the benchmark it is evaluated on. Kept to one paragraph so the guided and
++// unguided menus differ only by this text.
++const CHOICE_GUIDANCE: &str = "Pick by the edit you need: lines when you have just read the file and the change is one contiguous block at known line numbers; text when the surrounding code is short and unique enough to quote exactly; patch when a single call must carry several coordinated hunks or touch several files. Use content only to create a file or to rewrite one deliberately in full.";
+ 
+-#[derive(Clone, Default)]
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum EditingForm {
++    Lines,
++    Text,
++    Patch,
++}
++
++pub(crate) const DEFAULT_CHOICE_ORDER: [EditingForm; 3] =
++    [EditingForm::Lines, EditingForm::Text, EditingForm::Patch];
++
++impl EditingForm {
++    fn name(self) -> &'static str {
++        match self {
++            Self::Lines => "lines",
++            Self::Text => "text",
++            Self::Patch => "patch",
++        }
++    }
++
++    fn instructions(self) -> &'static str {
++        match self {
++            Self::Lines => LINES_INSTRUCTIONS,
++            Self::Text => TEXT_INSTRUCTIONS,
++            Self::Patch => PATCH_INSTRUCTIONS,
++        }
++    }
++}
++
++/// Parses a comma-separated permutation such as `text,patch,lines`.
++pub(crate) fn parse_choice_order(value: &str) -> Option<[EditingForm; 3]> {
++    let forms = value
++        .split(',')
++        .map(|name| match name.trim() {
++            "lines" => Some(EditingForm::Lines),
++            "text" => Some(EditingForm::Text),
++            "patch" => Some(EditingForm::Patch),
++            _ => None,
++        })
++        .collect::<Option<Vec<_>>>()?;
++    let order: [EditingForm; 3] = forms.try_into().ok()?;
++    DEFAULT_CHOICE_ORDER
++        .iter()
++        .all(|form| order.contains(form))
++        .then_some(order)
++}
++
++#[derive(Clone)]
+ pub(crate) struct EditingProfiles {
+     default: EditingMode,
+     overrides: BTreeMap<String, EditingMode>,
+     aliases: BTreeMap<String, String>,
++    choice_order: [EditingForm; 3],
++}
++
++impl Default for EditingProfiles {
++    fn default() -> Self {
++        Self {
++            default: EditingMode::default(),
++            overrides: BTreeMap::new(),
++            aliases: BTreeMap::new(),
++            choice_order: DEFAULT_CHOICE_ORDER,
++        }
++    }
+ }
+ 
+ impl From<&ModelConfig> for EditingProfiles {
+@@ -22,6 +92,10 @@ impl From<&ModelConfig> for EditingProfiles {
+                 .iter()
+                 .map(|endpoint| (endpoint.id.clone(), endpoint.provider_model.clone()))
+                 .collect(),
++            choice_order: std::env::var("S_CODE_EXPERIMENT_CHOICE_ORDER")
++                .ok()
++                .and_then(|value| parse_choice_order(&value))
++                .unwrap_or(DEFAULT_CHOICE_ORDER),
+         }
+     }
+ }
+@@ -53,10 +127,34 @@ impl EditingProfiles {
+     }
+ }
+ 
++impl EditingProfiles {
++    /// Resolves the session model's mode, applies it, and returns what was advertised.
++    pub(crate) fn configure(
++        &self,
++        messages: &mut Vec<ModelMessage>,
++        tools: &mut [ToolDefinition],
++        model: &str,
++    ) -> (EditingMode, [EditingForm; 3]) {
++        let mode = self.resolve(model);
++        configure_with_order(messages, tools, mode, self.choice_order);
++        (mode, self.choice_order)
++    }
++}
++
++#[cfg(test)]
+ pub(crate) fn configure(
+     messages: &mut Vec<ModelMessage>,
+     tools: &mut [ToolDefinition],
+     mode: EditingMode,
++) {
++    configure_with_order(messages, tools, mode, DEFAULT_CHOICE_ORDER);
++}
++
++fn configure_with_order(
++    messages: &mut Vec<ModelMessage>,
++    tools: &mut [ToolDefinition],
++    mode: EditingMode,
++    order: [EditingForm; 3],
+ ) {
+     messages.retain(|message| {
+         !(message.role == "system"
+@@ -69,18 +167,22 @@ pub(crate) fn configure(
+         return;
+     };
+     let instructions = match mode {
+-        EditingMode::Auto | EditingMode::Lines => {
+-            "Use files with per-file path, expected_revision and edits containing start_line/end_line/new_text. Ranges are 1-based, inclusive, non-overlapping and refer to the original numbered_content. Never copy line-number prefixes into new_text."
+-        }
+-        EditingMode::Text => {
+-            "Use files with per-file path, expected_revision and edits containing old_text/new_text. Copy old_text exactly, including whitespace, with enough context to match once. Replacements within a file run in array order; later edits see earlier results."
+-        }
+-        EditingMode::Patch => {
+-            "Use patch plus a revisions object keyed by every patch path. Supported syntax: *** Begin Patch, *** Add File: path or *** Update File: path, bare @@ before each update hunk, lines prefixed by space (context), - (remove), or + (add), and *** End Patch. Update hunks match exactly once in sequence, including trailing newlines; include existing context for insertions. No fuzzy matching, named/numbered @@ headers, Delete/Move operations or EOF markers. For files without trailing newlines or full replacements, use the files/content form instead."
++        EditingMode::Auto | EditingMode::Lines => LINES_INSTRUCTIONS.to_owned(),
++        EditingMode::Text => TEXT_INSTRUCTIONS.to_owned(),
++        EditingMode::Patch => PATCH_INSTRUCTIONS.to_owned(),
++        EditingMode::Choice | EditingMode::ChoiceGuided => {
++            let opening = if mode == EditingMode::ChoiceGuided {
++                format!("{CHOICE_PREAMBLE}\n{CHOICE_GUIDANCE}")
++            } else {
++                CHOICE_PREAMBLE.to_owned()
++            };
++            order.iter().fold(opening, |mut text, form| {
++                text.push_str(&format!("\n[{}] {}", form.name(), form.instructions()));
++                text
++            })
+         }
+     };
+-    let common = "Read existing files first and copy each file's 16-character revision. Use JSON null only for a new file. A revision belongs to one file, not the batch. Batch known independent edits for up to 32 unique paths and 16 MiB total content. All edits are validated before any write; filesystem writes are sequential, not a cross-file transaction. On a partial failure inspect the reported applied paths and re-read before retrying; Turn undo records remain available. Use content for creation or deliberate whole-file replacement. The editing format does not change permissions, sandbox or approval requirements.";
+-    tool.description = "Edit up to 32 workspace files with per-file revision checks. All files are validated before sequential writes; failures report applied paths. Follow the editing-format system instructions and this input schema.".into();
++    tool.description = TOOL_DESCRIPTION.into();
+     tool.parameters = schema(mode);
+     let position = messages
+         .iter()
+@@ -90,31 +192,72 @@ pub(crate) fn configure(
+         position,
+         ModelMessage {
+             role: "system".into(),
+-            content: Value::String(format!("{PROMPT_MARKER}{instructions}\n{common}")),
++            content: Value::String(format!(
++                "{PROMPT_MARKER}{instructions}\n{COMMON_INSTRUCTIONS}"
++            )),
+         },
+     );
+ }
+ 
++/// Experiment-only digests of what the model is shown. Hex digests pass
++/// through audit redaction unchanged.
++pub(crate) fn experiment_profile(
++    messages: &[ModelMessage],
++    tools: &[ToolDefinition],
++    mode: EditingMode,
++    order: [EditingForm; 3],
++) -> Value {
++    use sha2::{Digest, Sha256};
++    let digest = |input: &str| format!("{:x}", Sha256::digest(input));
++    let prompt = messages
++        .iter()
++        .filter(|message| message.role == "system")
++        .find_map(|message| {
++            message
++                .content
++                .as_str()
++                .filter(|text| text.starts_with(PROMPT_MARKER))
++        })
++        .unwrap_or_default();
++    let tool_text = |tool: &ToolDefinition| {
++        format!("{}\n{}\n{}\n", tool.name, tool.description, tool.parameters)
++    };
++    json!({
++        "editing_mode": mode,
++        "choice_order": order.map(EditingForm::name),
++        "editing_prompt_sha256": digest(prompt),
++        "apply_patch_sha256": tools
++            .iter()
++            .find(|tool| tool.name == "apply_patch")
++            .map(|tool| digest(&tool_text(tool))),
++        "tools": tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(),
++        "tools_sha256": digest(&tools.iter().map(tool_text).collect::<String>()),
++    })
++}
++
+ fn schema(mode: EditingMode) -> Value {
+     let revision = json!({"type":["string","null"],"minLength":16,"maxLength":16});
+-    let edit = match mode {
+-        EditingMode::Text => {
+-            json!({"type":"object","additionalProperties":false,"properties":{"old_text":{"type":"string","minLength":1},"new_text":{"type":"string"}},"required":["old_text","new_text"]})
+-        }
+-        _ => {
+-            json!({"type":"object","additionalProperties":false,"properties":{"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1},"new_text":{"type":"string"}},"required":["start_line","end_line","new_text"]})
+-        }
+-    };
++    let text_edit = json!({"type":"object","additionalProperties":false,"properties":{"old_text":{"type":"string","minLength":1},"new_text":{"type":"string"}},"required":["old_text","new_text"]});
++    let line_edit = json!({"type":"object","additionalProperties":false,"properties":{"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1},"new_text":{"type":"string"}},"required":["start_line","end_line","new_text"]});
++    let edit_array = |item: Value| json!({"type":"array","minItems":1,"maxItems":100,"items":item});
+     let mut file = json!({"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"},"expected_revision":revision,"content":{"type":"string"}},"required":["path","expected_revision"]});
+     if mode == EditingMode::Patch {
+         file["required"] = json!(["path", "expected_revision", "content"]);
+     } else {
+-        file["properties"]["edits"] =
+-            json!({"type":"array","minItems":1,"maxItems":100,"items":edit});
++        file["properties"]["edits"] = match mode {
++            EditingMode::Text => edit_array(text_edit),
++            EditingMode::Choice | EditingMode::ChoiceGuided => {
++                json!({"anyOf":[edit_array(line_edit), edit_array(text_edit)]})
++            }
++            _ => edit_array(line_edit),
++        };
+         file["oneOf"] = json!([{"required":["content"]},{"required":["edits"]}]);
+     }
+     let mut root = json!({"type":"object","additionalProperties":false,"properties":{"files":{"type":"array","minItems":1,"maxItems":32,"items":file}},"required":["files"]});
+-    if mode == EditingMode::Patch {
++    if matches!(
++        mode,
++        EditingMode::Patch | EditingMode::Choice | EditingMode::ChoiceGuided
++    ) {
+         root.as_object_mut().unwrap().remove("required");
+         root["properties"]["patch"] = json!({"type":"string"});
+         root["properties"]["revisions"] = json!({"type":"object","additionalProperties":revision});
+@@ -126,6 +269,96 @@ fn schema(mode: EditingMode) -> Value {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    #[test]
++    fn guided_choice_adds_only_the_selection_paragraph() {
++        let prompt = |mode| {
++            let mut messages = vec![ModelMessage {
++                role: "user".into(),
++                content: Value::String("task".into()),
++            }];
++            let mut tools = vec![ToolDefinition {
++                name: "apply_patch".into(),
++                description: String::new(),
++                parameters: json!({}),
++            }];
++            configure_with_order(&mut messages, &mut tools, mode, DEFAULT_CHOICE_ORDER);
++            let text = messages
++                .iter()
++                .find(|message| message.role == "system")
++                .and_then(|message| message.content.as_str().map(str::to_owned))
++                .expect("editing prompt");
++            (text, tools[0].parameters.clone())
++        };
++        let (plain, plain_schema) = prompt(EditingMode::Choice);
++        let (guided, guided_schema) = prompt(EditingMode::ChoiceGuided);
++        assert!(!plain.contains(CHOICE_GUIDANCE));
++        assert!(guided.contains(CHOICE_GUIDANCE));
++        // The guided menu differs from the plain one by exactly that paragraph.
++        assert_eq!(guided.replace(&format!("\n{CHOICE_GUIDANCE}"), ""), plain);
++        for form in DEFAULT_CHOICE_ORDER {
++            assert!(guided.contains(form.instructions()));
++        }
++        assert_eq!(guided_schema, plain_schema);
++    }
++
++    #[test]
++    fn choice_offers_every_form_in_the_configured_order() {
++        let mut prompts = std::collections::BTreeSet::new();
++        for order in ["lines,text,patch", "text,patch,lines", "patch,lines,text"] {
++            let order = parse_choice_order(order).unwrap();
++            let mut messages = Vec::new();
++            let mut tools = super::super::builtin_tools();
++            configure_with_order(&mut messages, &mut tools, EditingMode::Choice, order);
++            let prompt = messages[0].content.as_str().unwrap();
++            let positions = order.map(|form| prompt.find(form.instructions()).unwrap());
++            assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
++            assert!(prompt.starts_with(PROMPT_MARKER) && prompt.ends_with(COMMON_INSTRUCTIONS));
++            prompts.insert(prompt.to_owned());
++            let tool = tools
++                .iter()
++                .find(|tool| tool.name == "apply_patch")
++                .unwrap();
++            let edits =
++                &tool.parameters["properties"]["files"]["items"]["properties"]["edits"]["anyOf"];
++            assert!(edits[0]["items"]["properties"]["start_line"].is_object());
++            assert!(edits[1]["items"]["properties"]["old_text"].is_object());
++            assert!(tool.parameters["properties"]["patch"].is_object());
++            assert!(tool.parameters["oneOf"].is_array());
++        }
++        assert_eq!(prompts.len(), 3);
++        assert_eq!(parse_choice_order("lines,lines,patch"), None);
++        assert_eq!(parse_choice_order("lines,text"), None);
++        assert_eq!(parse_choice_order("lines,text,diff"), None);
++    }
++
++    #[test]
++    fn experiment_profile_reports_mode_order_and_survives_redaction() {
++        let profiles = EditingProfiles::default();
++        let mut digests = std::collections::BTreeSet::new();
++        for mode in [
++            EditingMode::Lines,
++            EditingMode::Text,
++            EditingMode::Patch,
++            EditingMode::Choice,
++        ] {
++            let mut messages = Vec::new();
++            let mut tools = super::super::builtin_tools();
++            configure_with_order(&mut messages, &mut tools, mode, profiles.choice_order);
++            let profile = experiment_profile(&messages, &tools, mode, profiles.choice_order);
++            assert_eq!(profile["editing_mode"], serde_json::to_value(mode).unwrap());
++            assert_eq!(profile["choice_order"], json!(["lines", "text", "patch"]));
++            assert_eq!(super::super::redact(profile.clone()), profile);
++            digests.insert(profile["apply_patch_sha256"].as_str().unwrap().to_owned());
++        }
++        assert_eq!(digests.len(), 4);
++        let mut messages = Vec::new();
++        let mut tools = super::super::builtin_tools();
++        assert_eq!(
++            profiles.configure(&mut messages, &mut tools, "anthropic/claude-sonnet-5"),
++            (EditingMode::Text, DEFAULT_CHOICE_ORDER)
++        );
++    }
+     #[test]
+     fn selects_family_alias_and_explicit_override() {
+         let mut profiles = EditingProfiles::default();
+@@ -259,4 +492,42 @@ mod tests {
+         configure(&mut messages, &mut [], EditingMode::Text);
+         assert_eq!(messages.len(), 2); // Read-only profiles do not advertise edits.
+     }
++
++    #[test]
++    fn existing_modes_keep_their_exact_prompt_description_and_schema() {
++        use sha2::{Digest, Sha256};
++        let actual: Vec<_> = [EditingMode::Lines, EditingMode::Text, EditingMode::Patch]
++            .into_iter()
++            .map(|mode| {
++                let mut messages = Vec::new();
++                let mut tools = super::super::builtin_tools();
++                configure(&mut messages, &mut tools, mode);
++                let tool = tools
++                    .iter()
++                    .find(|tool| tool.name == "apply_patch")
++                    .unwrap();
++                let input = format!(
++                    "{}\n{}\n{}",
++                    messages[0].content, tool.description, tool.parameters
++                );
++                (mode, format!("{:x}", Sha256::digest(input)))
++            })
++            .collect();
++        let expected = [
++            (
++                EditingMode::Lines,
++                "5117e1373428b1363b2199cd41f4dccd39d34c77eae532a097f24a1dd3cc6777",
++            ),
++            (
++                EditingMode::Text,
++                "ad6208e0c4091ab7b9e11563eccd839e5324ebb95bc489cf4c76157815e41e5a",
++            ),
++            (
++                EditingMode::Patch,
++                "a51bfd043a1fdd5be36e43d07a370fdac9a1fbf01b64762462eed8efe113aa94",
++            ),
++        ]
++        .map(|(mode, digest)| (mode, digest.to_string()));
++        assert_eq!(actual, expected);
++    }
+ }
+diff --git a/crates/daemon/src/experiment.rs b/crates/daemon/src/experiment.rs
+new file mode 100644
+index 0000000..7dbc1c4
+--- /dev/null
++++ b/crates/daemon/src/experiment.rs
+@@ -0,0 +1,352 @@
++//! Experiment-only instrumentation for the edit-format benchmark.
++//! Everything here is inert unless `S_CODE_EXPERIMENT` is set.
++use s_code_config::EditingMode;
++use serde_json::{Value, json};
++use std::{collections::BTreeSet, fmt::Write as _};
++
++const MAX_RECORDED_BYTES: usize = 512 * 1024;
++
++pub(crate) fn enabled() -> bool {
++    std::env::var_os("S_CODE_EXPERIMENT").is_some()
++}
++
++/// An experiment-only override, ignored unless `S_CODE_EXPERIMENT` is set.
++pub(crate) fn env_override<T: std::str::FromStr>(name: &str) -> Option<T> {
++    enabled()
++        .then(|| std::env::var(name).ok()?.parse().ok())
++        .flatten()
++}
++
++/// Tools offered when `S_CODE_EXPERIMENT_TOOL_SET=edit`: no command execution.
++pub(crate) const EDIT_TOOLS: &[&str] = &["read_file", "list_files", "search_text", "apply_patch"];
++
++fn tool_set_for(name: &str) -> Option<&'static [&'static str]> {
++    match name {
++        "edit" => Some(EDIT_TOOLS),
++        _ => None,
++    }
++}
++
++/// The experiment tool allowlist, if one is selected.
++pub(crate) fn tool_set() -> Option<&'static [&'static str]> {
++    enabled()
++        .then(|| std::env::var("S_CODE_EXPERIMENT_TOOL_SET").ok())
++        .flatten()
++        .and_then(|name| tool_set_for(&name))
++}
++
++pub(crate) fn tool_offered(tool: &str) -> bool {
++    tool_set().is_none_or(|tools| tools.contains(&tool))
++}
++
++/// The shape of one edit inside `apply_patch` arguments.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
++pub(crate) enum EditShape {
++    Lines,
++    Text,
++    Patch,
++    Content,
++    Unknown,
++}
++
++impl EditShape {
++    fn name(self) -> &'static str {
++        match self {
++            Self::Lines => "lines",
++            Self::Text => "text",
++            Self::Patch => "patch",
++            Self::Content => "content",
++            Self::Unknown => "unknown",
++        }
++    }
++}
++
++/// Every edit shape present in `apply_patch` arguments. Malformed input is
++/// `Unknown`; execution still reports the precise error.
++pub(crate) fn edit_shapes(arguments: &Value) -> BTreeSet<EditShape> {
++    let mut shapes = BTreeSet::new();
++    let Some(object) = arguments.as_object() else {
++        shapes.insert(EditShape::Unknown);
++        return shapes;
++    };
++    if object.contains_key("patch") {
++        shapes.insert(EditShape::Patch);
++    }
++    let files: Vec<&Value> = match object.get("files") {
++        Some(Value::Array(files)) => files.iter().collect(),
++        Some(_) => {
++            shapes.insert(EditShape::Unknown);
++            Vec::new()
++        }
++        None if object.contains_key("path") => vec![arguments],
++        None => Vec::new(),
++    };
++    for file in files {
++        if file.get("content").is_some() {
++            shapes.insert(EditShape::Content);
++        }
++        match file.get("edits") {
++            Some(Value::Array(edits)) => {
++                for edit in edits {
++                    let lines = edit.get("start_line").is_some() || edit.get("end_line").is_some();
++                    let text = edit.get("old_text").is_some();
++                    if lines {
++                        shapes.insert(EditShape::Lines);
++                    }
++                    if text {
++                        shapes.insert(EditShape::Text);
++                    }
++                    if !lines && !text {
++                        shapes.insert(EditShape::Unknown);
++                    }
++                }
++            }
++            Some(_) => {
++                shapes.insert(EditShape::Unknown);
++            }
++            None => {}
++        }
++    }
++    if shapes.is_empty() {
++        shapes.insert(EditShape::Unknown);
++    }
++    shapes
++}
++
++/// The uniform rejection for an edit form a single-format arm does not offer.
++/// Whole-file content stays allowed in every arm, as in PR #68.
++pub(crate) fn purity_error(mode: EditingMode, shapes: &BTreeSet<EditShape>) -> Option<String> {
++    let offered = match mode {
++        EditingMode::Lines => EditShape::Lines,
++        EditingMode::Text => EditShape::Text,
++        EditingMode::Patch => EditShape::Patch,
++        EditingMode::Auto | EditingMode::Choice | EditingMode::ChoiceGuided => return None,
++    };
++    let rejected = shapes
++        .iter()
++        .filter(|shape| {
++            !matches!(shape, EditShape::Content | EditShape::Unknown) && **shape != offered
++        })
++        .map(|shape| shape.name())
++        .collect::<Vec<_>>();
++    (!rejected.is_empty()).then(|| {
++        format!(
++            "this session's apply_patch accepts only the {} form or whole-file content; this call used: {}",
++            offered.name(),
++            rejected.join(", ")
++        )
++    })
++}
++
++/// Rejection for a tool outside the bench tool set, including tools the model
++/// names without having been offered them.
++pub(crate) fn tool_rejection(tool: &str) -> Option<String> {
++    (!tool_offered(tool)).then(|| format!("tool {tool} is not available in this session"))
++}
++
++/// Payload for `experiment.tool_call`. Arguments and errors are hex-encoded so
++/// audit redaction cannot rewrite them; sha256 always covers the full text.
++pub(crate) fn tool_call_payload(
++    call_id: &str,
++    tool: &str,
++    arguments: &str,
++    outcome: &str,
++    error: Option<&str>,
++) -> Value {
++    let parsed = (tool == "apply_patch")
++        .then(|| serde_json::from_str::<Value>(arguments).ok())
++        .flatten();
++    json!({
++        "model_call_id": call_id,
++        "tool": tool,
++        "outcome": outcome,
++        "arguments": recorded(arguments),
++        "error": error.map(recorded),
++        "edit_forms": parsed.as_ref().map(|value| {
++            edit_shapes(value).into_iter().map(EditShape::name).collect::<Vec<_>>()
++        }),
++        "edit_counts": parsed.as_ref().map(edit_counts),
++    })
++}
++
++fn recorded(text: &str) -> Value {
++    use sha2::{Digest, Sha256};
++    let bytes = text.as_bytes();
++    let kept = &bytes[..bytes.len().min(MAX_RECORDED_BYTES)];
++    let mut hex = String::with_capacity(kept.len() * 2);
++    for byte in kept {
++        let _ = write!(hex, "{byte:02x}");
++    }
++    json!({
++        "bytes": bytes.len(),
++        "sha256": format!("{:x}", Sha256::digest(bytes)),
++        "hex": hex,
++        "truncated": kept.len() < bytes.len(),
++    })
++}
++
++fn edit_counts(arguments: &Value) -> Value {
++    let files = arguments.get("files").and_then(Value::as_array);
++    let legacy = arguments.get("path").map(|_| arguments);
++    let patch = arguments.get("patch").and_then(Value::as_str).unwrap_or("");
++    let patch_files = patch
++        .lines()
++        .filter(|line| line.starts_with("*** Add File: ") || line.starts_with("*** Update File: "))
++        .count();
++    json!({
++        "files": files.map_or(usize::from(legacy.is_some()), Vec::len) + patch_files,
++        "edits": files
++            .into_iter()
++            .flatten()
++            .chain(legacy)
++            .filter_map(|file| file.get("edits").and_then(Value::as_array))
++            .map(Vec::len)
++            .sum::<usize>(),
++        "patch_hunks": patch.lines().filter(|line| line.starts_with("@@")).count(),
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn shapes(value: &Value) -> Vec<&'static str> {
++        edit_shapes(value)
++            .into_iter()
++            .map(EditShape::name)
++            .collect()
++    }
++
++    #[test]
++    fn tool_sets_are_named_allowlists() {
++        assert_eq!(tool_set_for("edit"), Some(EDIT_TOOLS));
++        assert!(!EDIT_TOOLS.contains(&"run_command"));
++        assert_eq!(tool_set_for("unknown"), None);
++    }
++
++    #[test]
++    fn classifies_every_apply_patch_form() {
++        let cases = [
++            (
++                json!({"files":[{"path":"a","expected_revision":"0123456789abcdef","edits":[{"start_line":1,"end_line":2,"new_text":"x"}]}]}),
++                vec!["lines"],
++            ),
++            (
++                json!({"files":[{"path":"a","expected_revision":"0123456789abcdef","edits":[{"old_text":"a","new_text":"b"}]}]}),
++                vec!["text"],
++            ),
++            (
++                json!({"patch":"*** Begin Patch\n*** End Patch","revisions":{}}),
++                vec!["patch"],
++            ),
++            (
++                json!({"files":[{"path":"a","expected_revision":null,"content":"x"}]}),
++                vec!["content"],
++            ),
++            (json!({"path":"a","content":"x"}), vec!["content"]),
++            (
++                json!({"path":"a","edits":[{"old_text":"a","new_text":"b"}]}),
++                vec!["text"],
++            ),
++            (
++                json!({"files":[{"path":"a","edits":[{"start_line":1,"end_line":1,"new_text":"x"}]},{"path":"b","edits":[{"old_text":"a","new_text":"b"}]}]}),
++                vec!["lines", "text"],
++            ),
++            (
++                json!({"files":[{"path":"a","edits":[{"start_line":1,"old_text":"a","new_text":"x"}]}]}),
++                vec!["lines", "text"],
++            ),
++            (
++                json!({"files":[{"path":"a","content":"x"},{"path":"b","edits":[{"old_text":"a","new_text":"b"}]}]}),
++                vec!["text", "content"],
++            ),
++            (
++                json!({"patch":"x","files":[{"path":"a","content":"x"}]}),
++                vec!["patch", "content"],
++            ),
++            (
++                json!({"files":[{"path":"a","edits":[{"end_line":3,"new_text":"x"}]}]}),
++                vec!["lines"],
++            ),
++            (
++                json!({"files":[{"path":"a","edits":[{"new_text":"x"}]}]}),
++                vec!["unknown"],
++            ),
++            (json!({"files":"a"}), vec!["unknown"]),
++            (json!({"files":[{"path":"a","edits":"x"}]}), vec!["unknown"]),
++            (json!({}), vec!["unknown"]),
++            (json!([1]), vec!["unknown"]),
++        ];
++        for (arguments, expected) in cases {
++            assert_eq!(shapes(&arguments), expected, "{arguments}");
++        }
++    }
++
++    #[test]
++    fn single_format_arms_reject_other_forms_with_one_message_shape() {
++        let lines = edit_shapes(
++            &json!({"files":[{"path":"a","edits":[{"start_line":1,"end_line":1,"new_text":"x"}]}]}),
++        );
++        let text =
++            edit_shapes(&json!({"files":[{"path":"a","edits":[{"old_text":"a","new_text":"b"}]}]}));
++        let patch = edit_shapes(&json!({"patch":"*** Begin Patch\n*** End Patch","revisions":{}}));
++        let content = edit_shapes(&json!({"files":[{"path":"a","content":"x"}]}));
++        let unknown = edit_shapes(&json!({"files":"a"}));
++        assert_eq!(purity_error(EditingMode::Lines, &lines), None);
++        assert_eq!(purity_error(EditingMode::Text, &text), None);
++        assert_eq!(purity_error(EditingMode::Patch, &patch), None);
++        for mode in [
++            EditingMode::Lines,
++            EditingMode::Text,
++            EditingMode::Patch,
++            EditingMode::Choice,
++        ] {
++            assert_eq!(purity_error(mode, &content), None);
++            assert_eq!(purity_error(mode, &unknown), None);
++        }
++        for shapes in [&lines, &text, &patch] {
++            assert_eq!(purity_error(EditingMode::Choice, shapes), None);
++        }
++        assert_eq!(
++            purity_error(EditingMode::Lines, &text).unwrap(),
++            "this session's apply_patch accepts only the lines form or whole-file content; this call used: text"
++        );
++        assert_eq!(
++            purity_error(EditingMode::Patch, &lines).unwrap(),
++            "this session's apply_patch accepts only the patch form or whole-file content; this call used: lines"
++        );
++        assert!(purity_error(EditingMode::Text, &patch).is_some());
++    }
++
++    #[test]
++    fn tool_call_payload_records_exact_arguments_and_counts() {
++        let arguments = r#"{"patch":"*** Begin Patch\n*** Update File: a\n@@\n-x\n+y\n@@\n-z\n+w\n*** End Patch","revisions":{"a":"0123456789abcdef"}}"#;
++        let error = "token=sk-abcdefghijklmnopqrstuvwxyz";
++        let payload = tool_call_payload("call_1", "apply_patch", arguments, "failed", Some(error));
++        assert_eq!(super::super::redact(payload.clone()), payload);
++        let decode = |hex: &str| {
++            (0..hex.len())
++                .step_by(2)
++                .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
++                .collect::<Vec<_>>()
++        };
++        assert_eq!(
++            decode(payload["arguments"]["hex"].as_str().unwrap()),
++            arguments.as_bytes()
++        );
++        assert_eq!(
++            decode(payload["error"]["hex"].as_str().unwrap()),
++            error.as_bytes()
++        );
++        assert_eq!(payload["edit_forms"], json!(["patch"]));
++        assert_eq!(
++            payload["edit_counts"],
++            json!({"files": 1, "edits": 0, "patch_hunks": 2})
++        );
++        let large = "x".repeat(MAX_RECORDED_BYTES + 1);
++        let payload = tool_call_payload("call_2", "run_command", &large, "completed", None);
++        assert_eq!(payload["arguments"]["truncated"], json!(true));
++        assert_eq!(payload["arguments"]["bytes"], json!(MAX_RECORDED_BYTES + 1));
++        assert!(payload["edit_forms"].is_null());
++    }
++}
+diff --git a/crates/daemon/src/lib.rs b/crates/daemon/src/lib.rs
+index 29f592a..4209354 100644
+--- a/crates/daemon/src/lib.rs
++++ b/crates/daemon/src/lib.rs
+@@ -1,4 +1,5 @@
+ mod editing;
++mod experiment;
+ 
+ use axum::{
+     Json, Router,
+@@ -14342,6 +14343,12 @@ async fn launch_prepared_agent_turn(
+                 "status": turn.status,
+                 "item_id": user_message.id,
+                 "source_input_id": source_input_id,
++                // Identity of the daemon process that executes this turn, so a
++                // measurement can bind the turn to the build that ran it.
++                "daemon": {
++                    "version": env!("CARGO_PKG_VERSION"),
++                    "instance_id": state.local_instance_id(),
++                },
+             }),
+         })
+         .await
+@@ -16097,6 +16104,7 @@ async fn execute_turn(
+                     }
+                     continue;
+                 }
++                AgentEvent::ToolOutcome { .. } if !experiment::enabled() => continue,
+                 event => event,
+             };
+             let (kind, mut payload) = agent_event_payload(agent_event);
+@@ -16127,17 +16135,49 @@ async fn execute_turn(
+     let runner =
+         AgentRunner::new(provider.clone(), executor, TurnLimits::default()).with_observer(observer);
+     let mut tools = tools_for_profile(&state, profile);
+-    editing::configure(
+-        &mut messages,
+-        &mut tools,
+-        state.editing_profiles.resolve(&session.model),
+-    );
++    let (editing_mode, choice_order) =
++        state
++            .editing_profiles
++            .configure(&mut messages, &mut tools, &session.model);
++    let temperature = experiment::env_override("S_CODE_EXPERIMENT_TEMPERATURE").unwrap_or(0.0);
++    let max_output_tokens =
++        experiment::env_override("S_CODE_EXPERIMENT_MAX_OUTPUT_TOKENS").unwrap_or(8192);
++    if std::env::var_os("S_CODE_EXPERIMENT").is_some() {
++        let limits = TurnLimits::default();
++        let mut payload =
++            editing::experiment_profile(&messages, &tools, editing_mode, choice_order);
++        payload["model"] = serde_json::json!(session.model);
++        payload["temperature"] = serde_json::json!(temperature);
++        payload["max_output_tokens"] = serde_json::json!(max_output_tokens);
++        payload["http_timeouts_seconds"] = serde_json::json!(s_code_model_gateway::http_timeouts());
++        payload["max_stream_events"] = serde_json::json!(s_code_model_gateway::max_stream_events());
++        payload["turn_limits"] = serde_json::json!({
++            "max_model_calls": limits.max_model_calls,
++            "max_tool_calls": limits.max_tool_calls,
++            "max_elapsed_seconds": limits.max_elapsed_seconds,
++            "model_stream_idle_seconds": limits.model_stream_idle_seconds,
++            "max_cost_micros": limits.max_cost_micros,
++            "max_total_tokens": limits.max_total_tokens,
++        });
++        state
++            .publish(Event {
++                id: Id::new("evt"),
++                sequence: 0,
++                timestamp: Utc::now(),
++                scope: turn.scope.clone(),
++                session_id: Some(turn.session_id.clone()),
++                turn_id: Some(turn.id.clone()),
++                kind: "experiment.turn_profile".into(),
++                payload,
++            })
++            .await?;
++    }
+     let request = AgentRunRequest {
+         model: session.model.clone(),
+-        temperature: 0.0,
++        temperature,
+         messages,
+         tools,
+-        max_output_tokens: 8192,
++        max_output_tokens,
+         routing: routing_policy(&state, &turn.scope, &session.model).await?,
+     };
+     let (ingress, bridge_task) = if let Some(step_inputs) = step_inputs {
+@@ -16706,14 +16746,43 @@ fn agent_event_payload(event: AgentEvent) -> (String, serde_json::Value) {
+             "tool.proposed".into(),
+             serde_json::json!({"model_call_id": call_id, "tool": tool}),
+         ),
++        AgentEvent::ToolOutcome {
++            call_id,
++            tool,
++            arguments,
++            outcome,
++            error,
++        } => (
++            "experiment.tool_call".into(),
++            experiment::tool_call_payload(&call_id, &tool, &arguments, &outcome, error.as_deref()),
++        ),
+         AgentEvent::Usage {
++            call,
+             input_tokens,
+             output_tokens,
+         } => (
+             "model.usage".into(),
+             serde_json::json!({
++                "model_call": call,
++                "input_tokens": input_tokens,
++                "output_tokens": output_tokens,
++            }),
++        ),
++        AgentEvent::ModelCallCompleted {
++            call,
++            usage_events,
++            input_tokens,
++            output_tokens,
++            outcome,
++        } => (
++            "model.call.completed".into(),
++            serde_json::json!({
++                "model_call": call,
++                "usage_events": usage_events,
+                 "input_tokens": input_tokens,
+                 "output_tokens": output_tokens,
++                "accounted": usage_events > 0,
++                "outcome": outcome,
+             }),
+         ),
+         AgentEvent::ModelRouteSelected {
+@@ -18899,6 +18968,16 @@ fn daemon_resource_claims(
+     }
+ }
+ 
++impl DaemonToolExecutor {
++    async fn experiment_purity_error(&self, arguments: &serde_json::Value) -> Option<String> {
++        let mode = match self.state.store.get_session(&self.session_id).await {
++            Ok(session) => self.state.editing_profiles.resolve(&session.model),
++            Err(error) => return Some(format!("experiment editing-mode lookup failed: {error}")),
++        };
++        experiment::purity_error(mode, &experiment::edit_shapes(arguments))
++    }
++}
++
+ #[async_trait::async_trait]
+ impl AgentToolExecutor for DaemonToolExecutor {
+     async fn prepare(
+@@ -18908,6 +18987,9 @@ impl AgentToolExecutor for DaemonToolExecutor {
+         arguments: serde_json::Value,
+         cancellation: &CancellationToken,
+     ) -> PreparedAgentToolCall {
++        if let Some(error) = experiment::tool_rejection(tool) {
++            return PreparedAgentToolCall::resolved(AgentToolResult::Failed { error });
++        }
+         if uses_execution_service(tool) {
+             let prepared = match self
+                 .state
+@@ -18945,6 +19027,13 @@ impl AgentToolExecutor for DaemonToolExecutor {
+                 return PreparedAgentToolCall::resolved(AgentToolResult::Failed { error });
+             }
+         };
++        // Checked on the post-hook arguments, which are the ones that execute.
++        if tool == "apply_patch"
++            && experiment::enabled()
++            && let Some(error) = self.experiment_purity_error(&arguments).await
++        {
++            return PreparedAgentToolCall::resolved(AgentToolResult::Failed { error });
++        }
+         let may_pause = if uses_execution_service(tool) {
+             let prepared = match self
+                 .state
+@@ -19438,7 +19527,9 @@ fn tools_for_profile(state: &AppState, profile: ToolProfile) -> Vec<ToolDefiniti
+     match profile {
+         ToolProfile::Default => tools
+             .into_iter()
+-            .filter(|tool| is_initial_default_tool(&tool.name))
++            .filter(|tool| {
++                is_initial_default_tool(&tool.name) && experiment::tool_offered(&tool.name)
++            })
+             .collect(),
+         ToolProfile::Plan => tools
+             .into_iter()
+@@ -33463,10 +33554,12 @@ printf '{"result_summary":"clean path"}'
+         };
+ 
+         observer.emit(AgentEvent::Usage {
++            call: 1,
+             input_tokens: 1,
+             output_tokens: 1,
+         });
+         observer.emit(AgentEvent::Usage {
++            call: 1,
+             input_tokens: 2,
+             output_tokens: 2,
+         });
+@@ -33476,6 +33569,7 @@ printf '{"result_summary":"clean path"}'
+         assert!(matches!(
+             receiver.recv().await,
+             Some(QueuedAgentEvent::Event(AgentEvent::Usage {
++                call: 1,
+                 input_tokens: 1,
+                 output_tokens: 1
+             }))
+diff --git a/crates/model-gateway/src/lib.rs b/crates/model-gateway/src/lib.rs
+index 050f0ff..ab11855 100644
+--- a/crates/model-gateway/src/lib.rs
++++ b/crates/model-gateway/src/lib.rs
+@@ -302,11 +302,29 @@ pub struct GeminiGenerateContent {
+     credentials: Arc<dyn CredentialProvider>,
+ }
+ 
++/// Connect, read and total HTTP timeouts in seconds. Defaults match the
++/// shipped client; the experiment harness may raise them.
++pub fn http_timeouts() -> [u64; 3] {
++    let seconds = |name: &str, default: u64| {
++        std::env::var(name)
++            .ok()
++            .and_then(|value| value.parse::<u64>().ok())
++            .filter(|value| *value > 0)
++            .unwrap_or(default)
++    };
++    [
++        seconds("S_CODE_EXPERIMENT_HTTP_CONNECT_SECONDS", 10),
++        seconds("S_CODE_EXPERIMENT_HTTP_READ_SECONDS", 45),
++        seconds("S_CODE_EXPERIMENT_HTTP_TOTAL_SECONDS", 180),
++    ]
++}
++
+ fn http_client() -> reqwest::Client {
++    let [connect, read, total] = http_timeouts();
+     reqwest::Client::builder()
+-        .connect_timeout(Duration::from_secs(10))
+-        .read_timeout(Duration::from_secs(45))
+-        .timeout(Duration::from_secs(180))
++        .connect_timeout(Duration::from_secs(connect))
++        .read_timeout(Duration::from_secs(read))
++        .timeout(Duration::from_secs(total))
+         .redirect(reqwest::redirect::Policy::none())
+         .build()
+         .expect("static model gateway HTTP configuration must be valid")
+@@ -497,6 +515,18 @@ const MAX_SSE_LINE_BYTES: usize = 1024 * 1024;
+ const MAX_SSE_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+ const MAX_SSE_MODEL_EVENTS: usize = 16_384;
+ 
++/// Most parsed events one model stream may yield. The default matches the
++/// shipped client; the experiment harness may raise it, because providers that
++/// stream one reasoning token per event reach 16,384 events well below the
++/// 32,768-token adaptive output cap.
++pub fn max_stream_events() -> usize {
++    std::env::var("S_CODE_EXPERIMENT_MAX_STREAM_EVENTS")
++        .ok()
++        .and_then(|value| value.parse::<usize>().ok())
++        .filter(|value| *value > 0)
++        .unwrap_or(MAX_SSE_MODEL_EVENTS)
++}
++
+ fn sse_stream(
+     response: reqwest::Response,
+     parser: fn(&str) -> Result<Vec<ModelEvent>, GatewayError>,
+@@ -512,6 +542,7 @@ fn sse_stream(
+         }));
+     }
+     let bytes = response.bytes_stream();
++    let max_events = max_stream_events();
+     let events = futures_util::stream::try_unfold(
+         (bytes, Vec::new(), VecDeque::new(), 0_usize, 0_usize),
+         move |(mut bytes, mut buffer, mut pending, mut received, mut emitted)| async move {
+@@ -519,7 +550,7 @@ fn sse_stream(
+                 emitted = emitted.checked_add(1).ok_or_else(|| {
+                     GatewayError::Provider("model stream event count overflow".into())
+                 })?;
+-                if emitted > MAX_SSE_MODEL_EVENTS {
++                if emitted > max_events {
+                     return Err(GatewayError::Provider(
+                         "model stream exceeds the event count limit".into(),
+                     ));
+@@ -546,7 +577,7 @@ fn sse_stream(
+                         emitted = emitted.checked_add(1).ok_or_else(|| {
+                             GatewayError::Provider("model stream event count overflow".into())
+                         })?;
+-                        if emitted > MAX_SSE_MODEL_EVENTS {
++                        if emitted > max_events {
+                             return Err(GatewayError::Provider(
+                                 "model stream exceeds the event count limit".into(),
+                             ));
+@@ -596,7 +627,7 @@ fn sse_stream(
+                         emitted = emitted.checked_add(1).ok_or_else(|| {
+                             GatewayError::Provider("model stream event count overflow".into())
+                         })?;
+-                        if emitted > MAX_SSE_MODEL_EVENTS {
++                        if emitted > max_events {
+                             return Err(GatewayError::Provider(
+                                 "model stream exceeds the event count limit".into(),
+                             ));
+diff --git a/crates/tool-runtime/src/lib.rs b/crates/tool-runtime/src/lib.rs
+index 91fa3cd..564634b 100644
+--- a/crates/tool-runtime/src/lib.rs
++++ b/crates/tool-runtime/src/lib.rs
+@@ -122,6 +122,11 @@ pub struct CommandCompatibility {
+ }
+ 
+ impl ToolRuntime {
++    /// The canonical workspace root on the host.
++    pub fn root(&self) -> &Path {
++        &self.root
++    }
++
+     pub fn open(
+         workspace_uri: &str,
+         platform: Arc<dyn PlatformRuntime>,
+diff --git a/docs-site/content/testing/README.md b/docs-site/content/testing/README.md
+index 7e3968b..634c8a6 100644
+--- a/docs-site/content/testing/README.md
++++ b/docs-site/content/testing/README.md
+@@ -110,6 +110,7 @@ missing paths and unexpected additions. Run:
+ ```sh
+ python3 tests/test-harness-benchmark.py validate
+ tests/test-harness-grader-integrity.sh
++python3 tests/benchmarks/harness/test_run.py
+ ```
+ 
+ The local benchmark runner is a repeatable engineering tool, not a secure
+@@ -132,6 +133,147 @@ competitor version and configuration, model identity, raw per-run artifacts,
+ provider usage, grader output, failures and stopped runs. Summary medians and
+ percentage claims are derived only from those artifacts.
+ 
++### Measuring an S-Code run
++
++`tests/benchmarks/harness/run.py` runs one frozen task through an S-Code
++launcher and records the result. It prepares the task with the tooling above,
++gives the run its own S-Code service namespace, runs
++`s-code exec --stream-json --ephemeral` inside the prepared workspace, keeps
++the raw event stream, stops the service it started, grades the final
++workspace with the unchanged protected grader and writes one `run.json`
++record beside the raw artifacts:
++
++```sh
++python3 tests/benchmarks/harness/run.py \
++  --track project --task durable-task-queue \
++  --s-code "$HOME/.local/bin/s-code" --model <model> \
++  --output .work/benchmark-runs/durable-task-queue-1
++```
++
++The output directory must be new and beneath `.work/`. It receives the
++prepared `workspace/`, the exact `prompt.txt`, the raw `events.jsonl` rows the
++CLI printed, `s-code.stderr.log`, the grader's `grade.json` and `grade.log`,
++`run.json`, and `service/` with the home, runtime and state directories of
++the daemon that served the run. Pass `--polyglot-root` for algorithm tasks
++and `--playwright-browsers` for frontend tasks, exactly as for `prepare` and
++`grade`. The exit status is 0 only for a comparable run.
++
++`--ephemeral` isolates the session, not the daemon: a long-lived local
++service would otherwise execute the measured turn with whatever build it was
++started from. The runner therefore points `S_CODE_HOME`, `S_CODE_RUNTIME_DIR`
++and `S_CODE_STATE_DIR` at fresh directories under `service/`, drops
++`S_CODE_URL`, `S_CODE_TOKEN` and `S_CODE_NO_AUTOSTART`, binds the service to
++an ephemeral loopback port, and lets the supplied launcher start a daemon
++there; only a daemon started for this run can be discovered, and the runner
++stops it afterwards. The isolated service reads the caller's configuration
++file in place (`--service-config`, else `S_CODE_CONFIG`, else the S-Code home
++`config.toml`) so the provider, endpoint and credential handle are the usual
++ones; nothing from it is copied, and the record keeps only its digest. Pass
++the launcher script as `--s-code`: the bare CLI binary starts no service and
++the run stays non-comparable.
++
++`run.json` (schema version 2) records the S-Code version and the source
++revision of the checkout, the task and its protected digest, the requested
++model and permission mode, the prompt digest, the wall-clock elapsed time of
++the S-Code process from launch to exit, the process exit status and timeout
++flag, the turn status and error code, the configured model, the effective
++model the daemon routed to with any fallback, context compactions, the usage
++totals below, the per-call `accounting`, the event `lifecycle` verdict, the
++`service` identity block, per-kind event counts, the unmodified grader result
++and relative references to every raw artifact. It never contains environment
++variables, credentials or paths outside the run directory. The raw artifacts
++do contain the agent's tool traffic for the workspace, and `service/state`
++holds the run's own daemon database and logs, so review them before sharing.
++
++A run is `comparable` only when every one of these holds:
++
++- the protected grader accepted the final workspace;
++- the event lifecycle is bound to one turn: the stream opens with exactly
++  one `turn.started` anchor naming the session and turn, every later row
++  carries those ids, and exactly one terminal `turn.completed`,
++  `turn.failed` or `turn.cancelled` row closes it (rows from any other
++  session or turn are counted and ignored, never folded into the evidence);
++- the turn completed, the process exited normally within its timeout, and
++  no event evidence was truncated or malformed;
++- the daemon that executed the turn is the run's isolated service: the
++  `daemon` identity the daemon stamps into `turn.created` names the instance
++  published in the run's own connection file, and its version is the version
++  the measured launcher reports;
++- every model call the daemon counted has complete, valid usage evidence
++  (see the accounting below) and the turn total equals the sum of the
++  per-call usage events;
++- the model route never changed.
++
++Every other run keeps its record and artifacts with an `exclusion_reason`.
++Compare only records that share the same task, S-Code revision, effective
++model, permission mode and prompt version, and derive any summary from the
++retained records.
++
++#### Usage semantics
++
++The `usage` block reports provider usage units, not an audited token bill,
++under the accounting `sum_of_provider_usage_events`: the model gateway turns
++every usage object a provider streams into one usage event, and the agent
++loop adds them all up for the turn. `turn.usage` is the daemon's total,
++`model.usage` rows are the individual events, and the record keeps both so the
++total can be checked against its parts. What one unit means depends on the
++provider stream:
++
++| Provider stream | What is summed | Consequence |
++| --- | --- | --- |
++| OpenAI-compatible | `usage.prompt_tokens` and `completion_tokens` of every chunk that carries `usage`; the request asks for a single final usage chunk | Exact per call when the endpoint honours `stream_options.include_usage` and reports usage once; an endpoint that repeats cumulative usage in every chunk is over-counted. Cached prompt tokens are included in the input count. |
++| Anthropic Messages | `message_start` input and output counts plus `message_delta` output count | `message_delta` carries the cumulative output count, so any initial output count in `message_start` is added on top. Cache-read and cache-creation tokens are not part of `input_tokens` and are not represented. |
++| Gemini | `usageMetadata` of every chunk that carries it | Exact for a stream that reports usage once; a stream that repeats cumulative `usageMetadata` per chunk is over-counted. |
++
++These are properties of the current gateway normalisation, not of this
++runner. Keep the provider and model constant across compared runs, and treat
++differences smaller than the per-call over-count above as noise. Normalising
++each provider stream to one final usage per model call, with cache tokens
++carried separately, is gateway follow-up work.
++
++#### Per-call accounting
++
++A matching turn total is not enough: a call whose provider stream carried no
++usage object leaves no trace in the sum, and the total then agrees with a
++partial subtotal. The daemon therefore attributes every `model.usage` row to
++its model call (`model_call`, counted from 1 within the turn) and publishes
++one `model.call.completed` row per counted call with the number of usage
++objects it streamed, their sums, whether any usage was observed
++(`accounted`) and how the call ended. The runner's `accounting` block is
++`verified` only when the records cover exactly the calls `turn.usage`
++counts, each call has at least one usage object, the streamed rows of each
++call reproduce its record, the records sum to the turn total, and no counter
++was missing or malformed. A missing or malformed counter is counted as
++invalid, never as zero. Several usage objects per call are normal for the
++provider streams above; a call without any makes the run non-comparable
++while keeping the subtotal in the record.
++
++#### Known limitations
++
++- The agent's own verification command compiles protected test modules into
++  `__pycache__` directories, which the grader rejects as undeclared paths. As
++  benchmark hygiene, not success logic, the runner removes directories named
++  `__pycache__` that contain only regular `.pyc` files before grading and
++  lists them under `workspace_normalization`; no other path is touched.
++- The frozen `incident-report-cli` task declares only `tests` as protected
++  and `incident_report` as editable, so its own `README.md` is rejected as an
++  undeclared path before any candidate is graded. Until the catalog is
++  corrected in a separate change, that task cannot produce a passing run.
++- Frontend tasks need Playwright for the agent's own `npm test`, which the
++  network-off sandbox cannot install, so expect agent self-verification to
++  fail on that track unless you provide it.
++- The recorded source revision is that of the checkout containing the runner;
++  no S-Code build embeds one. The runner verifies that the turn ran on the
++  daemon it started (instance identity) and that this daemon reports the
++  launcher's crate version, which is the strongest identity the build
++  carries. Build the launcher's binaries from the recorded revision, and
++  treat the crate version as a build family, not a commit.
++- A caller configuration that pins `daemon.listen` is overridden to an
++  ephemeral loopback port for the isolated service, so two runs and the
++  caller's own daemon can coexist.
++- Interrupting the runner keeps the artifacts written so far but produces no
++  `run.json`; a run directory without a record must not enter any summary.
++
+ ## Release candidates
+ 
+ After merging a prospective release, manually run **S-Code full verification**
+diff --git a/docs/testing/README.md b/docs/testing/README.md
+index 7e3968b..634c8a6 100644
+--- a/docs/testing/README.md
++++ b/docs/testing/README.md
+@@ -110,6 +110,7 @@ missing paths and unexpected additions. Run:
+ ```sh
+ python3 tests/test-harness-benchmark.py validate
+ tests/test-harness-grader-integrity.sh
++python3 tests/benchmarks/harness/test_run.py
+ ```
+ 
+ The local benchmark runner is a repeatable engineering tool, not a secure
+@@ -132,6 +133,147 @@ competitor version and configuration, model identity, raw per-run artifacts,
+ provider usage, grader output, failures and stopped runs. Summary medians and
+ percentage claims are derived only from those artifacts.
+ 
++### Measuring an S-Code run
++
++`tests/benchmarks/harness/run.py` runs one frozen task through an S-Code
++launcher and records the result. It prepares the task with the tooling above,
++gives the run its own S-Code service namespace, runs
++`s-code exec --stream-json --ephemeral` inside the prepared workspace, keeps
++the raw event stream, stops the service it started, grades the final
++workspace with the unchanged protected grader and writes one `run.json`
++record beside the raw artifacts:
++
++```sh
++python3 tests/benchmarks/harness/run.py \
++  --track project --task durable-task-queue \
++  --s-code "$HOME/.local/bin/s-code" --model <model> \
++  --output .work/benchmark-runs/durable-task-queue-1
++```
++
++The output directory must be new and beneath `.work/`. It receives the
++prepared `workspace/`, the exact `prompt.txt`, the raw `events.jsonl` rows the
++CLI printed, `s-code.stderr.log`, the grader's `grade.json` and `grade.log`,
++`run.json`, and `service/` with the home, runtime and state directories of
++the daemon that served the run. Pass `--polyglot-root` for algorithm tasks
++and `--playwright-browsers` for frontend tasks, exactly as for `prepare` and
++`grade`. The exit status is 0 only for a comparable run.
++
++`--ephemeral` isolates the session, not the daemon: a long-lived local
++service would otherwise execute the measured turn with whatever build it was
++started from. The runner therefore points `S_CODE_HOME`, `S_CODE_RUNTIME_DIR`
++and `S_CODE_STATE_DIR` at fresh directories under `service/`, drops
++`S_CODE_URL`, `S_CODE_TOKEN` and `S_CODE_NO_AUTOSTART`, binds the service to
++an ephemeral loopback port, and lets the supplied launcher start a daemon
++there; only a daemon started for this run can be discovered, and the runner
++stops it afterwards. The isolated service reads the caller's configuration
++file in place (`--service-config`, else `S_CODE_CONFIG`, else the S-Code home
++`config.toml`) so the provider, endpoint and credential handle are the usual
++ones; nothing from it is copied, and the record keeps only its digest. Pass
++the launcher script as `--s-code`: the bare CLI binary starts no service and
++the run stays non-comparable.
++
++`run.json` (schema version 2) records the S-Code version and the source
++revision of the checkout, the task and its protected digest, the requested
++model and permission mode, the prompt digest, the wall-clock elapsed time of
++the S-Code process from launch to exit, the process exit status and timeout
++flag, the turn status and error code, the configured model, the effective
++model the daemon routed to with any fallback, context compactions, the usage
++totals below, the per-call `accounting`, the event `lifecycle` verdict, the
++`service` identity block, per-kind event counts, the unmodified grader result
++and relative references to every raw artifact. It never contains environment
++variables, credentials or paths outside the run directory. The raw artifacts
++do contain the agent's tool traffic for the workspace, and `service/state`
++holds the run's own daemon database and logs, so review them before sharing.
++
++A run is `comparable` only when every one of these holds:
++
++- the protected grader accepted the final workspace;
++- the event lifecycle is bound to one turn: the stream opens with exactly
++  one `turn.started` anchor naming the session and turn, every later row
++  carries those ids, and exactly one terminal `turn.completed`,
++  `turn.failed` or `turn.cancelled` row closes it (rows from any other
++  session or turn are counted and ignored, never folded into the evidence);
++- the turn completed, the process exited normally within its timeout, and
++  no event evidence was truncated or malformed;
++- the daemon that executed the turn is the run's isolated service: the
++  `daemon` identity the daemon stamps into `turn.created` names the instance
++  published in the run's own connection file, and its version is the version
++  the measured launcher reports;
++- every model call the daemon counted has complete, valid usage evidence
++  (see the accounting below) and the turn total equals the sum of the
++  per-call usage events;
++- the model route never changed.
++
++Every other run keeps its record and artifacts with an `exclusion_reason`.
++Compare only records that share the same task, S-Code revision, effective
++model, permission mode and prompt version, and derive any summary from the
++retained records.
++
++#### Usage semantics
++
++The `usage` block reports provider usage units, not an audited token bill,
++under the accounting `sum_of_provider_usage_events`: the model gateway turns
++every usage object a provider streams into one usage event, and the agent
++loop adds them all up for the turn. `turn.usage` is the daemon's total,
++`model.usage` rows are the individual events, and the record keeps both so the
++total can be checked against its parts. What one unit means depends on the
++provider stream:
++
++| Provider stream | What is summed | Consequence |
++| --- | --- | --- |
++| OpenAI-compatible | `usage.prompt_tokens` and `completion_tokens` of every chunk that carries `usage`; the request asks for a single final usage chunk | Exact per call when the endpoint honours `stream_options.include_usage` and reports usage once; an endpoint that repeats cumulative usage in every chunk is over-counted. Cached prompt tokens are included in the input count. |
++| Anthropic Messages | `message_start` input and output counts plus `message_delta` output count | `message_delta` carries the cumulative output count, so any initial output count in `message_start` is added on top. Cache-read and cache-creation tokens are not part of `input_tokens` and are not represented. |
++| Gemini | `usageMetadata` of every chunk that carries it | Exact for a stream that reports usage once; a stream that repeats cumulative `usageMetadata` per chunk is over-counted. |
++
++These are properties of the current gateway normalisation, not of this
++runner. Keep the provider and model constant across compared runs, and treat
++differences smaller than the per-call over-count above as noise. Normalising
++each provider stream to one final usage per model call, with cache tokens
++carried separately, is gateway follow-up work.
++
++#### Per-call accounting
++
++A matching turn total is not enough: a call whose provider stream carried no
++usage object leaves no trace in the sum, and the total then agrees with a
++partial subtotal. The daemon therefore attributes every `model.usage` row to
++its model call (`model_call`, counted from 1 within the turn) and publishes
++one `model.call.completed` row per counted call with the number of usage
++objects it streamed, their sums, whether any usage was observed
++(`accounted`) and how the call ended. The runner's `accounting` block is
++`verified` only when the records cover exactly the calls `turn.usage`
++counts, each call has at least one usage object, the streamed rows of each
++call reproduce its record, the records sum to the turn total, and no counter
++was missing or malformed. A missing or malformed counter is counted as
++invalid, never as zero. Several usage objects per call are normal for the
++provider streams above; a call without any makes the run non-comparable
++while keeping the subtotal in the record.
++
++#### Known limitations
++
++- The agent's own verification command compiles protected test modules into
++  `__pycache__` directories, which the grader rejects as undeclared paths. As
++  benchmark hygiene, not success logic, the runner removes directories named
++  `__pycache__` that contain only regular `.pyc` files before grading and
++  lists them under `workspace_normalization`; no other path is touched.
++- The frozen `incident-report-cli` task declares only `tests` as protected
++  and `incident_report` as editable, so its own `README.md` is rejected as an
++  undeclared path before any candidate is graded. Until the catalog is
++  corrected in a separate change, that task cannot produce a passing run.
++- Frontend tasks need Playwright for the agent's own `npm test`, which the
++  network-off sandbox cannot install, so expect agent self-verification to
++  fail on that track unless you provide it.
++- The recorded source revision is that of the checkout containing the runner;
++  no S-Code build embeds one. The runner verifies that the turn ran on the
++  daemon it started (instance identity) and that this daemon reports the
++  launcher's crate version, which is the strongest identity the build
++  carries. Build the launcher's binaries from the recorded revision, and
++  treat the crate version as a build family, not a commit.
++- A caller configuration that pins `daemon.listen` is overridden to an
++  ephemeral loopback port for the isolated service, so two runs and the
++  caller's own daemon can coexist.
++- Interrupting the runner keeps the artifacts written so far but produces no
++  `run.json`; a run directory without a record must not enter any summary.
++
+ ## Release candidates
+ 
+ After merging a prospective release, manually run **S-Code full verification**
+diff --git a/scripts/verify-community.sh b/scripts/verify-community.sh
+index 1dad8c9..8fbc358 100755
+--- a/scripts/verify-community.sh
++++ b/scripts/verify-community.sh
+@@ -78,6 +78,7 @@ verify_policy() {
+   python3 tests/test-verification.py
+   python3 tests/test-harness-benchmark.py validate
+   tests/test-harness-grader-integrity.sh
++  python3 tests/benchmarks/harness/test_run.py
+   npm ci --prefix "$ROOT/tests/benchmarks/runner" --no-audit --no-fund
+   if [ "${S_CODE_SKIP_NETWORK_AUDIT:-0}" = 1 ]; then
+     echo "deferred benchmark dependency audit to Dependabot and release verification"
+diff --git a/tests/README.md b/tests/README.md
+index abcf107..cb657f4 100644
+--- a/tests/README.md
++++ b/tests/README.md
+@@ -20,6 +20,16 @@ successful run.
+ - `test-harness-grader-integrity.sh`: rejects a defined set of accidental or
+   common grader-tampering patterns. It is a regression check, not an
+   adversarial anti-cheat boundary.
++- `benchmarks/harness/run.py` and `benchmarks/harness/test_run.py`: run one
++  frozen task through an S-Code launcher inside an isolated service
++  namespace, keep the raw `--stream-json` events, verify the turn's
++  lifecycle, daemon identity and per-call usage accounting, grade the final
++  workspace and write one run record; the test drives the collector with a
++  fake binary and passes on a fresh checkout:
++
++  ```sh
++  python3 -m unittest discover -s tests/benchmarks/harness -p test_run.py -v
++  ```
+ - `test-community-candidate.sh`: full-profile enforcement and candidate Git
+   tree, workflow-run and public CodeQL evidence binding.
+ - `test-dco.sh`: author-bound sign-off enforcement and bot-bypass rejection.
+diff --git a/tests/benchmarks/harness/run.py b/tests/benchmarks/harness/run.py
+new file mode 100755
+index 0000000..28f5927
+--- /dev/null
++++ b/tests/benchmarks/harness/run.py
+@@ -0,0 +1,976 @@
++#!/usr/bin/env python3
++"""Run one frozen coding-harness benchmark task through an S-Code binary.
++
++The script prepares a frozen task with the existing benchmark tooling, runs
++``s-code exec --stream-json --ephemeral`` inside the prepared workspace, keeps
++the raw event stream, grades the final workspace with the unchanged protected
++grader and writes one structured run record beside the raw artifacts.
++"""
++
++from __future__ import annotations
++
++import argparse
++from datetime import datetime, timedelta, timezone
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import shutil
++import signal
++import subprocess
++import sys
++import threading
++import time
++from typing import Any, BinaryIO, Iterable
++
++
++REPOSITORY = Path(__file__).resolve().parents[3]
++BENCHMARK_SCRIPT = REPOSITORY / "tests/test-harness-benchmark.py"
++MANIFEST_PATH = REPOSITORY / "tests/benchmarks/harness/manifest.json"
++WORK_ROOT = (REPOSITORY / ".work").resolve()
++SCHEMA_VERSION = 2
++RECORD_KIND = "harness_benchmark_run"
++PROMPT_VERSION = 1
++# The daemon totals every usage event the provider streamed during the turn.
++# The figures are provider usage units under that summation, not an audited
++# token bill; see docs/testing/README.md for the per-provider semantics.
++USAGE_ACCOUNTING = "sum_of_provider_usage_events"
++PERMISSION_MODES = ("workspace", "accept-edits", "manual")
++MAX_EVENT_BYTES = 64 * 1024 * 1024
++MAX_STDERR_BYTES = 4 * 1024 * 1024
++ARTIFACTS = {
++    "workspace": "workspace",
++    "prompt": "prompt.txt",
++    "events": "events.jsonl",
++    "stderr": "s-code.stderr.log",
++    "grade": "grade.json",
++    "grade_log": "grade.log",
++    "service": "service",
++}
++RECORD_NAME = "run.json"
++# Every run gets its own S-Code service namespace beneath the run directory,
++# so the measured turn can only be executed by a daemon started for this run
++# from the supplied launcher. An explicit remote daemon, a disabled autostart
++# or an inherited home would let an unrelated, possibly older, daemon answer.
++SERVICE_DIRECTORIES = {"home": "service/home", "runtime": "service/runtime", "state": "service/state"}
++CONNECTION_FILE = "daemon.json"
++ISOLATION_ENVIRONMENT = {"S_CODE_HOME": "home", "S_CODE_RUNTIME_DIR": "runtime", "S_CODE_STATE_DIR": "state"}
++REMOVED_ENVIRONMENT = ("S_CODE_URL", "S_CODE_TOKEN", "S_CODE_NO_AUTOSTART")
++SERVICE_LISTEN_ENVIRONMENT = "S_CODE_DAEMON_LISTEN"
++SERVICE_STOP_SECONDS = 5.0
++LIFECYCLE_ANCHOR = "turn.started"
++TERMINAL_KINDS = {"turn.completed": "completed", "turn.failed": "failed", "turn.cancelled": "cancelled"}
++TIMESTAMP = re.compile(
++    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$"
++)
++
++
++def load_manifest() -> dict[str, Any]:
++    with MANIFEST_PATH.open(encoding="utf-8") as source:
++        manifest = json.load(source)
++    if manifest.get("schema_version") != 3:
++        raise ValueError("unsupported harness benchmark manifest schema")
++    return manifest
++
++
++def find_task(manifest: dict[str, Any], track: str, task_id: str) -> dict[str, Any]:
++    for candidate in manifest["tracks"].get(track, []):
++        if candidate["id"] == task_id:
++            return candidate
++    raise ValueError(f"unknown {track} task: {task_id}")
++
++
++def output_destination(value: str) -> Path:
++    destination = Path(value).resolve()
++    if destination == WORK_ROOT or WORK_ROOT not in destination.parents:
++        raise ValueError("benchmark run output must be beneath .work/")
++    if destination.exists():
++        raise ValueError(f"output directory already exists: {destination}")
++    return destination
++
++
++def resolve_binary(value: str) -> Path:
++    candidate = value if "/" in value else shutil.which(value)
++    if candidate is None:
++        raise ValueError(f"S-Code binary is not on PATH: {value}")
++    path = Path(os.path.abspath(candidate))
++    if not path.is_file() or not os.access(path, os.X_OK):
++        raise ValueError(f"S-Code binary is not an executable file: {value}")
++    return path
++
++
++def compose_prompt(track: str, task: dict[str, Any]) -> str:
++    """Return the fixed instruction text handed to the agent for a task."""
++
++    if track == "algorithm":
++        opening = (
++            f"Implement {task['implementation']} in the current workspace so that "
++            f"every test in {task['test_file']} passes."
++        )
++    else:
++        opening = "Complete the task described in README.md in the current workspace."
++    editable = ", ".join(task["editable_paths"])
++    protected = ", ".join(task["protected_paths"])
++    verification = " ".join(task["grader"])
++    return "\n".join(
++        [
++            opening,
++            f"Only create or modify these paths: {editable}.",
++            f"Do not modify any other path, including: {protected}.",
++            f"Verify your work with `{verification}` before you finish, "
++            "and report the observed result.",
++        ]
++    ) + "\n"
++
++
++def parse_timestamp(value: Any) -> float | None:
++    """Parse the daemon's RFC 3339 timestamps, which may carry nanoseconds."""
++
++    if not isinstance(value, str):
++        return None
++    match = TIMESTAMP.match(value)
++    if match is None:
++        return None
++    year, month, day, hour, minute, second, fraction, zone = match.groups()
++    microsecond = int((fraction or "0")[:6].ljust(6, "0"))
++    if zone == "Z":
++        offset = timedelta()
++    else:
++        sign = 1 if zone[0] == "+" else -1
++        offset = sign * timedelta(hours=int(zone[1:3]), minutes=int(zone[4:6]))
++    try:
++        moment = datetime(
++            int(year), int(month), int(day), int(hour), int(minute), int(second),
++            microsecond, tzinfo=timezone(offset),
++        )
++    except ValueError:
++        return None
++    return moment.timestamp()
++
++
++def as_count(value: Any) -> int | None:
++    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
++        return None
++    return value
++
++
++def model_call_record(summary: dict[str, Any], call: int) -> dict[str, Any]:
++    return summary["model_calls"].setdefault(
++        call,
++        {
++            "call": call,
++            "records": 0,
++            "usage_events": None,
++            "input_units": None,
++            "output_units": None,
++            "accounted": None,
++            "outcome": None,
++            "usage_rows": 0,
++            "usage_row_input_units": 0,
++            "usage_row_output_units": 0,
++        },
++    )
++
++
++def record_usage_row(summary: dict[str, Any], payload: dict[str, Any]) -> None:
++    """Fold one ``model.usage`` row; a missing or malformed counter is invalid, never zero."""
++
++    usage = summary["model_usage"]
++    input_units = as_count(payload.get("input_tokens"))
++    output_units = as_count(payload.get("output_tokens"))
++    if input_units is None or output_units is None:
++        usage["invalid_events"] += 1
++        return
++    usage["events"] += 1
++    usage["input_units"] += input_units
++    usage["output_units"] += output_units
++    call = as_count(payload.get("model_call"))
++    if call is None or call < 1:
++        usage["unattributed_events"] += 1
++        return
++    record = model_call_record(summary, call)
++    record["usage_rows"] += 1
++    record["usage_row_input_units"] += input_units
++    record["usage_row_output_units"] += output_units
++
++
++def record_call_row(summary: dict[str, Any], payload: dict[str, Any]) -> None:
++    """Fold one ``model.call.completed`` row, the daemon's final accounting state for a call."""
++
++    call = as_count(payload.get("model_call"))
++    usage_events = as_count(payload.get("usage_events"))
++    input_units = as_count(payload.get("input_tokens"))
++    output_units = as_count(payload.get("output_tokens"))
++    accounted = payload.get("accounted")
++    outcome = payload.get("outcome")
++    if (
++        call is None or call < 1 or usage_events is None or input_units is None or output_units is None
++        or not isinstance(accounted, bool) or not isinstance(outcome, str)
++    ):
++        summary["invalid_call_records"] += 1
++        return
++    record = model_call_record(summary, call)
++    record["records"] += 1
++    record.update(usage_events=usage_events, input_units=input_units, output_units=output_units, accounted=accounted, outcome=outcome)
++
++
++def summarize_events(lines: Iterable[str]) -> dict[str, Any]:
++    """Reduce the versioned ``--stream-json`` rows of one turn to accounting facts.
++
++    The reducer fails closed. The first accepted row must be the single
++    ``turn.started`` anchor that names the measured session and turn; every
++    later row must carry exactly those ids or it is ignored as foreign
++    evidence; exactly one terminal row may close the turn; and a usage
++    counter that is missing or malformed is counted as invalid, never as
++    zero. The lifecycle verdict and every count are kept for the record.
++    """
++
++    summary: dict[str, Any] = {
++        "total": 0,
++        "malformed_lines": 0,
++        "by_kind": {},
++        "session_id": None,
++        "turn_id": None,
++        "status": "unknown",
++        "error_code": None,
++        "model": None,
++        "routed_models": [],
++        "route_fallbacks": 0,
++        "context_compactions": 0,
++        "approvals_requested": 0,
++        "first_timestamp": None,
++        "last_timestamp": None,
++        "turn_usage": None,
++        "model_usage": {"input_units": 0, "output_units": 0, "events": 0, "invalid_events": 0, "unattributed_events": 0},
++        "model_calls": {},
++        "invalid_call_records": 0,
++        "daemon": None,
++        "lifecycle": {"valid": False, "anchors": 0, "terminal": [], "unbound_rows": 0, "foreign_rows": 0, "reasons": []},
++    }
++    lifecycle = summary["lifecycle"]
++    for line in lines:
++        text = line.strip()
++        if not text:
++            continue
++        try:
++            row = json.loads(text)
++        except json.JSONDecodeError:
++            summary["malformed_lines"] += 1
++            continue
++        kind = row.get("kind", row.get("type")) if isinstance(row, dict) else None
++        if not isinstance(kind, str) or row.get("schema_version") != "1":
++            summary["malformed_lines"] += 1
++            continue
++        summary["total"] += 1
++        summary["by_kind"][kind] = summary["by_kind"].get(kind, 0) + 1
++        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
++        stamp = parse_timestamp(row.get("timestamp"))
++        if stamp is not None:
++            first = summary["first_timestamp"]
++            last = summary["last_timestamp"]
++            summary["first_timestamp"] = stamp if first is None else min(first, stamp)
++            summary["last_timestamp"] = stamp if last is None else max(last, stamp)
++        session_id, turn_id = row.get("session_id"), row.get("turn_id")
++        if kind == LIFECYCLE_ANCHOR:
++            lifecycle["anchors"] += 1
++            if lifecycle["anchors"] == 1 and isinstance(session_id, str) and session_id and isinstance(turn_id, str) and turn_id:
++                summary["session_id"], summary["turn_id"] = session_id, turn_id
++            continue
++        if summary["turn_id"] is None:
++            lifecycle["unbound_rows"] += 1
++            continue
++        if (session_id, turn_id) != (summary["session_id"], summary["turn_id"]):
++            lifecycle["foreign_rows"] += 1
++            continue
++        if kind in TERMINAL_KINDS:
++            lifecycle["terminal"].append(kind)
++            if kind == "turn.failed":
++                error_code = row.get("error_code", payload.get("error_code"))
++                summary["error_code"] = error_code if isinstance(error_code, str) else None
++        elif kind == "turn.created":
++            daemon = payload.get("daemon") if isinstance(payload.get("daemon"), dict) else {}
++            summary["daemon"] = {
++                field: daemon[field] if isinstance(daemon.get(field), str) and daemon[field] else None
++                for field in ("version", "instance_id")
++            }
++        elif kind == "model.usage":
++            record_usage_row(summary, payload)
++        elif kind == "model.call.completed":
++            record_call_row(summary, payload)
++        elif kind == "turn.usage":
++            counts = {
++                "input_units": as_count(payload.get("input_units")),
++                "output_units": as_count(payload.get("output_units")),
++                "model_calls": as_count(payload.get("model_calls")),
++                "tool_calls": as_count(payload.get("tool_calls")),
++            }
++            if all(value is not None for value in counts.values()):
++                summary["turn_usage"] = counts
++            if isinstance(payload.get("model"), str) and payload["model"]:
++                summary["model"] = payload["model"]
++        elif kind == "model.route.selected":
++            model_id = payload.get("model_id")
++            if isinstance(model_id, str) and model_id not in summary["routed_models"]:
++                summary["routed_models"].append(model_id)
++        elif kind == "model.route.fallback":
++            summary["route_fallbacks"] += 1
++        elif kind == "context.compacted":
++            summary["context_compactions"] += 1
++        elif kind == "approval.required":
++            summary["approvals_requested"] += 1
++    terminal = lifecycle["terminal"]
++    if lifecycle["anchors"] != 1:
++        lifecycle["reasons"].append(f"expected exactly one {LIFECYCLE_ANCHOR} anchor, saw {lifecycle['anchors']}")
++    elif summary["turn_id"] is None:
++        lifecycle["reasons"].append(f"the {LIFECYCLE_ANCHOR} anchor names no session and turn")
++    if len(terminal) != 1:
++        observed = f" ({', '.join(terminal)})" if terminal else ""
++        lifecycle["reasons"].append(f"expected exactly one terminal turn event, saw {len(terminal)}{observed}")
++    if lifecycle["unbound_rows"]:
++        lifecycle["reasons"].append(f"{lifecycle['unbound_rows']} rows precede the {LIFECYCLE_ANCHOR} anchor")
++    if lifecycle["foreign_rows"]:
++        lifecycle["reasons"].append(f"{lifecycle['foreign_rows']} rows carry another session or turn")
++    if terminal and all(kind == terminal[0] for kind in terminal):
++        summary["status"] = TERMINAL_KINDS[terminal[0]]
++    elif terminal:
++        summary["status"] = "conflicting"
++    lifecycle["valid"] = not lifecycle["reasons"]
++    return summary
++
++
++def usage_record(summary: dict[str, Any]) -> dict[str, Any]:
++    """Prefer the daemon's turn total and cross-check it against per-call events.
++
++    ``turn.usage`` is the daemon's total for the turn. ``model.usage`` rows are
++    the individual provider usage events that total is built from, so their
++    sum must match; a summed fallback is labelled and never carries call counts.
++    """
++
++    per_call = summary["model_usage"]
++    model_usage_sum = {"input_units": per_call["input_units"], "output_units": per_call["output_units"]}
++    matches = None
++    if summary["turn_usage"] is not None:
++        counts = dict(summary["turn_usage"])
++        source = "turn.usage"
++        matches = (counts["input_units"], counts["output_units"]) == (
++            model_usage_sum["input_units"], model_usage_sum["output_units"],
++        )
++    elif per_call["events"] > 0:
++        counts = {**model_usage_sum, "model_calls": None, "tool_calls": None}
++        source = "model.usage"
++    else:
++        counts = {"input_units": None, "output_units": None, "model_calls": None, "tool_calls": None}
++        source = "missing"
++    total = None
++    if counts["input_units"] is not None and counts["output_units"] is not None:
++        total = counts["input_units"] + counts["output_units"]
++    return {
++        "accounting": USAGE_ACCOUNTING,
++        "source": source,
++        **counts,
++        "total_units": total,
++        "model_usage_events": per_call["events"],
++        "model_usage_sum": model_usage_sum,
++        "matches_model_usage_sum": matches,
++    }
++
++
++def accounting_record(summary: dict[str, Any]) -> dict[str, Any]:
++    """Certify that every model call the daemon counted has complete usage evidence.
++
++    The daemon publishes one ``model.call.completed`` record per counted call
++    and attributes every ``model.usage`` row to its call. The turn is verified
++    only when the records cover exactly the calls the turn total counts, each
++    call saw at least one provider usage object, the streamed rows of each
++    call reproduce its record, nothing was malformed, and the per-call records
++    sum to the turn total. Several usage objects per call are allowed; a call
++    without any is not.
++    """
++
++    calls = summary["model_calls"]
++    usage = summary["model_usage"]
++    turn_usage = summary["turn_usage"]
++    reasons: list[str] = []
++    expected = turn_usage["model_calls"] if turn_usage is not None else None
++    if expected is None:
++        reasons.append("the daemon reported no turn usage")
++    elif sorted(calls) != list(range(1, expected + 1)):
++        reasons.append(f"the daemon counted {expected} model calls but accounting records cover calls {sorted(calls)}")
++    for call in sorted(calls):
++        record = calls[call]
++        if record["records"] != 1:
++            reasons.append(f"model call {call} has {record['records']} accounting records")
++            continue
++        if not record["accounted"] or record["usage_events"] == 0:
++            reasons.append(f"model call {call} has no provider usage")
++        if record["usage_rows"] != record["usage_events"]:
++            reasons.append(f"model call {call} reports {record['usage_events']} usage events but {record['usage_rows']} were streamed")
++        if (record["usage_row_input_units"], record["usage_row_output_units"]) != (record["input_units"], record["output_units"]):
++            reasons.append(f"the usage rows of model call {call} do not sum to its accounting record")
++    if usage["invalid_events"]:
++        reasons.append(f"{usage['invalid_events']} usage rows carry missing or invalid counters")
++    if usage["unattributed_events"]:
++        reasons.append(f"{usage['unattributed_events']} usage rows are not attributed to a model call")
++    if summary["invalid_call_records"]:
++        reasons.append(f"{summary['invalid_call_records']} accounting records are malformed")
++    if turn_usage is not None and calls:
++        complete = [record for record in calls.values() if record["records"] == 1]
++        totals = (sum(record["input_units"] for record in complete), sum(record["output_units"] for record in complete))
++        if totals != (turn_usage["input_units"], turn_usage["output_units"]):
++            reasons.append("the per-call accounting does not sum to the turn usage")
++    return {
++        "verified": not reasons,
++        "model_calls": expected,
++        "calls": [
++            {key: calls[call][key] for key in ("call", "usage_events", "input_units", "output_units", "accounted", "outcome")}
++            for call in sorted(calls)
++        ],
++        "reasons": reasons,
++    }
++
++
++def effective_model(summary: dict[str, Any]) -> str | None:
++    """Name the one model that served the turn, or nothing when that is ambiguous."""
++
++    routed = summary["routed_models"]
++    if len(routed) == 1:
++        return routed[0]
++    return summary["model"] if not routed else None
++
++
++def service_reason(service: dict[str, Any], summary: dict[str, Any], harness: dict[str, Any]) -> str | None:
++    """Explain why the daemon that executed the turn is not the isolated build under test."""
++
++    if service["reason"]:
++        return f"the isolated service could not be verified: {service['reason']}"
++    daemon = summary["daemon"]
++    if daemon is None or daemon["instance_id"] is None or daemon["version"] is None:
++        return "the turn carries no daemon identity"
++    if daemon["instance_id"] != service["instance_id"]:
++        return "the turn was executed by a daemon other than the isolated service"
++    expected = harness["expected_daemon_version"]
++    if expected is None or daemon["version"] != expected:
++        return f"the daemon version {daemon['version']} does not match the measured binary"
++    return None
++
++
++def exclusion_reason(
++    grader_passed: bool,
++    process: dict[str, Any],
++    summary: dict[str, Any],
++    usage: dict[str, Any],
++    accounting: dict[str, Any],
++    service: dict[str, Any],
++    harness: dict[str, Any],
++) -> str | None:
++    """Explain why a run must stay out of an efficiency comparison, outcome first."""
++
++    if not grader_passed:
++        return "the protected grader rejected the final workspace"
++    if process["timed_out"]:
++        return "the S-Code process exceeded the run timeout"
++    lifecycle = summary["lifecycle"]
++    if not lifecycle["valid"]:
++        return "the event lifecycle is not bound to one turn: " + "; ".join(lifecycle["reasons"])
++    if summary["status"] != "completed":
++        return f"the turn ended with status {summary['status']}"
++    if process["exit_code"] != 0:
++        return f"s-code exited with status {process['exit_code']}"
++    if process["events_truncated"] or summary["malformed_lines"]:
++        return "the event evidence is incomplete"
++    reason = service_reason(service, summary, harness)
++    if reason is not None:
++        return reason
++    if usage["source"] != "turn.usage":
++        return "the daemon reported no turn usage"
++    if usage["model_usage_events"] == 0 or usage["total_units"] == 0:
++        return "the provider reported no usage"
++    if not accounting["verified"]:
++        return "the model-call accounting is incomplete: " + "; ".join(accounting["reasons"])
++    if not usage["matches_model_usage_sum"]:
++        return "the turn usage does not match the per-call usage events"
++    if summary["route_fallbacks"] or len(summary["routed_models"]) > 1:
++        return "the model route changed during the turn"
++    return None
++
++
++def drain(stream: BinaryIO, destination: Path, limit: int, result: dict[str, Any]) -> None:
++    """Copy a pipe to a file up to ``limit`` bytes, then keep the pipe drained."""
++
++    written = 0
++    with destination.open("wb") as sink:
++        while chunk := stream.read(65536):
++            keep = chunk[: max(limit - written, 0)]
++            if keep:
++                sink.write(keep)
++                written += len(keep)
++            if len(keep) < len(chunk):
++                result["truncated"] = True
++    result["bytes"] = written
++
++
++def run_agent(
++    binary: Path, workspace: Path, prompt: str, args: argparse.Namespace, output: Path, environment: dict[str, str]
++) -> dict[str, Any]:
++    """Run ``s-code exec`` in the workspace and return process facts for the record."""
++
++    command = [
++        str(binary), "exec", "--stream-json", "--ephemeral",
++        "--permission-mode", args.permission_mode, "--timeout", str(args.timeout),
++    ]
++    if args.model:
++        command += ["--model", args.model]
++    command += ["--", prompt]
++    environment = dict(environment)
++    environment["S_CODE_WORKSPACE"] = workspace.as_uri()
++    outputs = {name: {"truncated": False, "bytes": 0} for name in ("events", "stderr")}
++    started = time.monotonic()
++    started_at = datetime.now(timezone.utc)
++    process = subprocess.Popen(
++        command,
++        cwd=workspace,
++        env=environment,
++        stdin=subprocess.DEVNULL,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.PIPE,
++    )
++    threads = [
++        threading.Thread(target=drain, args=(process.stdout, output / ARTIFACTS["events"], MAX_EVENT_BYTES, outputs["events"]), daemon=True),
++        threading.Thread(target=drain, args=(process.stderr, output / ARTIFACTS["stderr"], MAX_STDERR_BYTES, outputs["stderr"]), daemon=True),
++    ]
++    for thread in threads:
++        thread.start()
++    timed_out = False
++    try:
++        process.wait(timeout=args.timeout + args.grace_seconds)
++    except subprocess.TimeoutExpired:
++        # The CLI's own --timeout is the primary bound and releases the ephemeral
++        # session. Only the client process is killed here; the isolated service
++        # is stopped by the runner once the run is over.
++        timed_out = True
++        process.kill()
++        process.wait()
++    for thread in threads:
++        thread.join(timeout=max(args.grace_seconds, 1))
++    return {
++        "started_at": started_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
++        "elapsed_seconds": round(time.monotonic() - started, 3),
++        "exit_code": process.returncode,
++        "timed_out": timed_out,
++        "events_truncated": outputs["events"]["truncated"],
++        "stderr_truncated": outputs["stderr"]["truncated"],
++    }
++
++
++def service_config(explicit: str | None) -> dict[str, Any]:
++    """Locate the configuration the isolated service loads, without copying it.
++
++    The provider, model endpoint and credential handle live in the caller's
++    S-Code configuration file. The isolated service reads that file in place
++    through ``S_CODE_CONFIG``; nothing from it is copied into the run
++    directory, and the record keeps only its digest and where it came from.
++    """
++
++    if explicit:
++        path = Path(explicit).resolve()
++        source = "argument"
++        if path.is_symlink() or not path.is_file():
++            raise ValueError(f"service config is not a regular file: {explicit}")
++    elif os.environ.get("S_CODE_CONFIG"):
++        path = Path(os.environ["S_CODE_CONFIG"])
++        source = "S_CODE_CONFIG"
++        if path.is_symlink() or not path.is_file():
++            raise ValueError("S_CODE_CONFIG does not name a regular file")
++    else:
++        home = Path(os.environ["S_CODE_HOME"]) if os.environ.get("S_CODE_HOME") else Path.home() / ".s-code"
++        path = home / "config.toml"
++        source = "home"
++        if path.is_symlink() or not path.is_file():
++            return {"path": None, "source": "none", "sha256": None}
++    return {"path": path, "source": source, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
++
++
++def prepare_service(output: Path, config: dict[str, Any]) -> tuple[dict[str, str], dict[str, Path], dict[str, Any]]:
++    """Give the run a private S-Code service namespace beneath its directory.
++
++    The environment handed to the measured binary points the home, runtime
++    and state directories into the run directory and drops any explicit
++    remote daemon or autostart override, so the launcher can only discover or
++    start a daemon that belongs to this run. The state directory is fresh, so
++    no session, memory or experience of the caller reaches the turn.
++    """
++
++    directories = {name: output / relative for name, relative in SERVICE_DIRECTORIES.items()}
++    for directory in directories.values():
++        directory.mkdir(parents=True)
++        directory.chmod(0o700)
++    environment = dict(os.environ)
++    for name in REMOVED_ENVIRONMENT:
++        environment.pop(name, None)
++    for name, key in ISOLATION_ENVIRONMENT.items():
++        environment[name] = str(directories[key])
++    environment[SERVICE_LISTEN_ENVIRONMENT] = "127.0.0.1:0"
++    if config["path"] is None:
++        environment.pop("S_CODE_CONFIG", None)
++    else:
++        environment["S_CODE_CONFIG"] = str(config["path"])
++    return environment, directories, {"source": config["source"], "sha256": config["sha256"]}
++
++
++def process_alive(pid: int | None) -> bool:
++    if pid is None or pid <= 1:
++        return False
++    try:
++        # A child that already exited lingers as a zombie until it is reaped;
++        # reaping is harmless when the process is not ours.
++        os.waitpid(pid, os.WNOHANG)
++    except ChildProcessError:
++        pass
++    try:
++        os.kill(pid, 0)
++    except ProcessLookupError:
++        return False
++    except PermissionError:
++        return True
++    return True
++
++
++def inspect_service(directories: dict[str, Path], run_started: float) -> tuple[dict[str, Any], int | None]:
++    """Read the connection the isolated service published and judge whether it is this run's daemon."""
++
++    service: dict[str, Any] = {
++        "isolated": True,
++        "connection_file": False,
++        "instance_id": None,
++        "started_at": None,
++        "pid_alive_after_run": None,
++        "stopped": None,
++        "reason": None,
++    }
++    connection_path = directories["runtime"] / CONNECTION_FILE
++    if connection_path.is_symlink() or not connection_path.is_file():
++        service["reason"] = "the isolated service published no connection file"
++        return service, None
++    try:
++        connection = json.loads(connection_path.read_text(encoding="utf-8"))
++    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
++        connection = None
++    if not isinstance(connection, dict):
++        service["reason"] = "the isolated service connection file is unreadable"
++        return service, None
++    service["connection_file"] = True
++    instance_id = connection.get("instance_id")
++    started_at = connection.get("started_at")
++    pid = as_count(connection.get("pid"))
++    service["instance_id"] = instance_id if isinstance(instance_id, str) and instance_id else None
++    service["started_at"] = started_at if isinstance(started_at, str) else None
++    service["pid_alive_after_run"] = process_alive(pid)
++    started = parse_timestamp(started_at)
++    if service["instance_id"] is None:
++        service["reason"] = "the isolated service published no instance id"
++    elif started is None or started + 1.0 < run_started:
++        service["reason"] = "the isolated service connection predates this run"
++    return service, pid
++
++
++def stop_service(pid: int | None) -> bool | None:
++    """Terminate the daemon this run started; ``None`` when there was nothing left to stop."""
++
++    if pid is None or pid in (os.getpid(), os.getppid()) or not process_alive(pid):
++        return None
++    try:
++        os.kill(pid, signal.SIGTERM)
++    except ProcessLookupError:
++        return True
++    except PermissionError:
++        return False
++    deadline = time.monotonic() + SERVICE_STOP_SECONDS
++    while time.monotonic() < deadline:
++        if not process_alive(pid):
++            return True
++        time.sleep(0.05)
++    try:
++        os.kill(pid, signal.SIGKILL)
++    except (ProcessLookupError, PermissionError):
++        pass
++    time.sleep(0.05)
++    return not process_alive(pid)
++
++
++def remove_bytecode_caches(workspace: Path) -> list[str]:
++    """Benchmark hygiene: drop ``__pycache__`` directories that hold only ``.pyc`` files.
++
++    Running the task's documented test command compiles protected test modules
++    into ``__pycache__``, which the protected grader rejects as an undeclared
++    path. Only directories named ``__pycache__`` whose entries are all regular
++    ``.pyc`` files are removed, so no task source or other candidate file can
++    be touched; everything else is left for the grader to judge, and the
++    removed paths are recorded in the run record.
++    """
++
++    removed: list[str] = []
++    for root, directories, _ in os.walk(workspace, topdown=True, followlinks=False):
++        root_path = Path(root)
++        if root_path == workspace:
++            directories[:] = [directory for directory in directories if directory != ".git"]
++        for name in list(directories):
++            path = root_path / name
++            if name != "__pycache__" or path.is_symlink():
++                continue
++            if all(entry.is_file() and not entry.is_symlink() and entry.suffix == ".pyc" for entry in path.iterdir()):
++                shutil.rmtree(path)
++                directories.remove(name)
++                removed.append(path.relative_to(workspace).as_posix())
++    return sorted(removed)
++
++
++def benchmark_command(command: str, track: str, task_id: str, *arguments: str) -> subprocess.CompletedProcess[str]:
++    return subprocess.run(
++        [sys.executable, str(BENCHMARK_SCRIPT), command, "--track", track, "--task", task_id, *arguments],
++        check=False,
++        text=True,
++        capture_output=True,
++    )
++
++
++def prepare_workspace(args: argparse.Namespace, workspace: Path) -> None:
++    arguments = ["--destination", str(workspace)]
++    if args.polyglot_root:
++        arguments += ["--polyglot-root", args.polyglot_root]
++    completed = benchmark_command("prepare", args.track, args.task, *arguments)
++    if completed.returncode != 0:
++        detail = completed.stderr.strip() or completed.stdout.strip() or f"exit status {completed.returncode}"
++        raise ValueError(f"benchmark preparation failed: {detail}")
++
++
++def grade_workspace(args: argparse.Namespace, workspace: Path, output: Path) -> dict[str, Any]:
++    arguments = ["--workspace", str(workspace), "--timeout", str(args.grader_timeout)]
++    if args.playwright_browsers:
++        arguments += ["--playwright-browsers", args.playwright_browsers]
++    completed = benchmark_command("grade", args.track, args.task, *arguments)
++    (output / ARTIFACTS["grade_log"]).write_text(
++        f"exit status: {completed.returncode}\n--- stdout ---\n{completed.stdout}\n--- stderr ---\n{completed.stderr}",
++        encoding="utf-8",
++    )
++    lines = [line for line in completed.stdout.splitlines() if line.strip()]
++    try:
++        result = json.loads(lines[-1]) if lines else None
++    except json.JSONDecodeError:
++        result = None
++    if not isinstance(result, dict) or not isinstance(result.get("passed"), bool):
++        result = {
++            "task": args.task,
++            "track": args.track,
++            "passed": False,
++            "reason": "the grader did not produce a structured result",
++            "grader_exit_code": completed.returncode,
++        }
++    (output / ARTIFACTS["grade"]).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
++    return result
++
++
++def harness_identity(binary: Path) -> dict[str, Any]:
++    """Identify the measured binary and the checkout it is expected to come from."""
++
++    def command(*arguments: str, timeout: float) -> str | None:
++        try:
++            completed = subprocess.run(list(arguments), check=False, text=True, capture_output=True, timeout=timeout)
++        except (OSError, subprocess.TimeoutExpired):
++            return None
++        return completed.stdout if completed.returncode == 0 else None
++
++    version = command(str(binary), "--version", timeout=60)
++    revision = command("git", "-C", str(REPOSITORY), "rev-parse", "HEAD", timeout=60)
++    status = command("git", "-C", str(REPOSITORY), "status", "--porcelain", timeout=60)
++    version_line = version.strip().splitlines()[0].strip() if version and version.strip() else None
++    return {
++        "name": "s-code",
++        "version": version_line,
++        # The daemon stamps its crate version into turn.created; the CLI prints
++        # the same crate version, so the two must agree for the turn to have
++        # run on the build under measurement. No build embeds a source
++        # revision, so the checkout revision below is expected, not verified.
++        "expected_daemon_version": version_line.split()[-1] if version_line else None,
++        "source_revision": revision.strip() if revision else None,
++        "source_dirty": bool(status.strip()) if status is not None else None,
++    }
++
++
++def build_record(
++    *,
++    harness: dict[str, Any],
++    track: str,
++    task: dict[str, Any],
++    configuration: dict[str, Any],
++    process: dict[str, Any],
++    summary: dict[str, Any],
++    grader: dict[str, Any],
++    removed_caches: list[str],
++    service: dict[str, Any],
++) -> dict[str, Any]:
++    usage = usage_record(summary)
++    accounting = accounting_record(summary)
++    usage["accounting_verified"] = accounting["verified"]
++    turn_elapsed = None
++    if summary["first_timestamp"] is not None and summary["last_timestamp"] is not None:
++        turn_elapsed = round(summary["last_timestamp"] - summary["first_timestamp"], 3)
++    passed = bool(grader.get("passed"))
++    reason = exclusion_reason(passed, process, summary, usage, accounting, service, harness)
++    daemon = summary["daemon"] or {"version": None, "instance_id": None}
++    service_record = {
++        **service,
++        "daemon_version": daemon["version"],
++        "daemon_instance_id": daemon["instance_id"],
++        "identity_verified": service_reason(service, summary, harness) is None,
++    }
++    return {
++        "schema_version": SCHEMA_VERSION,
++        "kind": RECORD_KIND,
++        "harness": harness,
++        "task": {"track": track, "id": task["id"], "protected_sha256": task["protected_sha256"]},
++        "configuration": configuration,
++        "started_at": process["started_at"],
++        "elapsed_seconds": process["elapsed_seconds"],
++        "process": {key: process[key] for key in ("exit_code", "timed_out", "events_truncated", "stderr_truncated")},
++        "turn": {
++            "session_id": summary["session_id"],
++            "turn_id": summary["turn_id"],
++            "status": summary["status"],
++            "error_code": summary["error_code"],
++            "model": summary["model"],
++            "effective_model": effective_model(summary),
++            "routed_models": summary["routed_models"],
++            "route_fallbacks": summary["route_fallbacks"],
++            "context_compactions": summary["context_compactions"],
++            "approvals_requested": summary["approvals_requested"],
++            "elapsed_seconds": turn_elapsed,
++        },
++        "usage": usage,
++        "accounting": accounting,
++        "lifecycle": summary["lifecycle"],
++        "service": service_record,
++        "events": {
++            "total": summary["total"],
++            "malformed_lines": summary["malformed_lines"],
++            "by_kind": summary["by_kind"],
++        },
++        "workspace_normalization": {"removed_bytecode_caches": removed_caches},
++        "grader": grader,
++        "passed": passed,
++        "comparable": reason is None,
++        "exclusion_reason": reason,
++        "artifacts": dict(ARTIFACTS),
++    }
++
++
++def run(args: argparse.Namespace) -> int:
++    task = find_task(load_manifest(), args.track, args.task)
++    binary = resolve_binary(args.s_code)
++    output = output_destination(args.output)
++    config = service_config(args.service_config)
++    prompt = compose_prompt(args.track, task)
++    output.parent.mkdir(parents=True, exist_ok=True)
++    output.mkdir()
++    workspace = output / ARTIFACTS["workspace"]
++    (output / ARTIFACTS["prompt"]).write_text(prompt, encoding="utf-8")
++    prepare_workspace(args, workspace)
++
++    environment, directories, service_config_record = prepare_service(output, config)
++    configuration = {
++        "invocation": "s-code exec --stream-json --ephemeral",
++        "service": "isolated home, runtime and state beneath the run directory",
++        "service_config": service_config_record,
++        "model": args.model,
++        "permission_mode": args.permission_mode,
++        "timeout_seconds": args.timeout,
++        "grace_seconds": args.grace_seconds,
++        "grader_timeout_seconds": args.grader_timeout,
++        "prompt_version": PROMPT_VERSION,
++        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
++    }
++    harness = harness_identity(binary)
++    run_started = time.time()
++    try:
++        process = run_agent(binary, workspace, prompt, args, output, environment)
++    finally:
++        service, pid = inspect_service(directories, run_started)
++        service["stopped"] = stop_service(pid)
++    with (output / ARTIFACTS["events"]).open(encoding="utf-8", errors="replace") as events:
++        summary = summarize_events(events)
++    removed_caches = remove_bytecode_caches(workspace)
++    grader = grade_workspace(args, workspace, output)
++    record = build_record(
++        harness=harness,
++        track=args.track,
++        task=task,
++        configuration=configuration,
++        process=process,
++        summary=summary,
++        grader=grader,
++        removed_caches=removed_caches,
++        service=service,
++    )
++    (output / RECORD_NAME).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
++    print(
++        json.dumps(
++            {
++                "record": str(output / RECORD_NAME),
++                "track": args.track,
++                "task": args.task,
++                "passed": record["passed"],
++                "comparable": record["comparable"],
++                "exclusion_reason": record["exclusion_reason"],
++                "elapsed_seconds": record["elapsed_seconds"],
++                "total_units": record["usage"]["total_units"],
++            },
++            sort_keys=True,
++        )
++    )
++    return 0 if record["comparable"] else 2
++
++
++def bounded_int(minimum: int, maximum: int):
++    def parse(value: str) -> int:
++        number = int(value)
++        if number < minimum or number > maximum:
++            raise argparse.ArgumentTypeError(f"must be between {minimum} and {maximum}")
++        return number
++
++    return parse
++
++
++def parser() -> argparse.ArgumentParser:
++    result = argparse.ArgumentParser(description=__doc__)
++    result.add_argument("--track", required=True, choices=("algorithm", "project", "frontend"))
++    result.add_argument("--task", required=True)
++    result.add_argument("--s-code", required=True, help="S-Code launcher or CLI binary to measure")
++    result.add_argument("--output", required=True, help="new run directory beneath .work/")
++    result.add_argument("--model", help="model identifier passed to s-code exec --model")
++    result.add_argument("--permission-mode", default="workspace", choices=PERMISSION_MODES)
++    result.add_argument("--timeout", type=bounded_int(1, 86_400), default=600, help="s-code exec --timeout seconds")
++    result.add_argument(
++        "--grace-seconds", type=bounded_int(0, 3_600), default=30,
++        help="extra seconds allowed for the CLI to exit after its own timeout before it is killed",
++    )
++    result.add_argument("--grader-timeout", type=float, default=120.0)
++    result.add_argument(
++        "--service-config",
++        help="config.toml the isolated service loads in place (default: S_CODE_CONFIG, else the S-Code home config)",
++    )
++    result.add_argument("--polyglot-root", help="frozen polyglot checkout for algorithm tasks")
++    result.add_argument("--playwright-browsers", help="browser cache passed to the frontend grader")
++    return result
++
++
++def main() -> int:
++    arguments = parser().parse_args()
++    try:
++        return run(arguments)
++    except (OSError, ValueError, subprocess.SubprocessError) as error:
++        print(f"harness benchmark run error: {error}", file=sys.stderr)
++        return 2
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/benchmarks/harness/test_run.py b/tests/benchmarks/harness/test_run.py
+new file mode 100644
+index 0000000..abe12a2
+--- /dev/null
++++ b/tests/benchmarks/harness/test_run.py
+@@ -0,0 +1,867 @@
++#!/usr/bin/env python3
++"""Regression coverage for the S-Code harness benchmark run collector."""
++
++from __future__ import annotations
++
++import importlib.util
++import io
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[3]
++SCRIPT = ROOT / "tests/benchmarks/harness/run.py"
++WORK_ROOT = ROOT / ".work"
++spec = importlib.util.spec_from_file_location("harness_run", SCRIPT)
++harness_run = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(harness_run)
++
++INSTANCE = "inst_fake_0123456789abcdef"
++FAKE_SCRIPT = """#!/bin/sh
++if [ "$1" = "--version" ]; then
++  echo "s-code 0.0.0-fake"
++  exit 0
++fi
++printf 'cwd=%s\\n' "$PWD" >&2
++printf 'workspace=%s\\n' "${S_CODE_WORKSPACE:-}" >&2
++printf 'home=%s\\nruntime=%s\\nstate=%s\\n' "${S_CODE_HOME:-unset}" "${S_CODE_RUNTIME_DIR:-unset}" "${S_CODE_STATE_DIR:-unset}" >&2
++printf 'url=%s\\ntoken=%s\\nautostart=%s\\nconfig=%s\\nlisten=%s\\n' "${S_CODE_URL:-unset}" "${S_CODE_TOKEN:-unset}" "${S_CODE_NO_AUTOSTART:-unset}" "${S_CODE_CONFIG:-unset}" "${S_CODE_DAEMON_LISTEN:-unset}" >&2
++printf 'args=%s\\n' "$*" >&2
++if [ "${FAKE_CONNECTION:-1}" = "1" ] && [ -n "${S_CODE_RUNTIME_DIR:-}" ]; then
++  printf '{"schema_version":1,"daemon_url":"http://127.0.0.1:1","token":"fake","instance_id":"%s","pid":%s,"started_at":"%s"}\\n' \\
++    "${FAKE_INSTANCE:-inst_fake_0123456789abcdef}" "${FAKE_SERVICE_PID:-$$}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$S_CODE_RUNTIME_DIR/daemon.json"
++fi
++"""
++PROCESS_OK = {"exit_code": 0, "timed_out": False, "events_truncated": False, "stderr_truncated": False}
++SERVICE_OK = {
++    "isolated": True,
++    "connection_file": True,
++    "instance_id": INSTANCE,
++    "started_at": "2026-09-09T09:59:59Z",
++    "pid_alive_after_run": False,
++    "stopped": None,
++    "reason": None,
++}
++HARNESS_OK = {
++    "name": "s-code",
++    "version": "s-code 0.0.0-fake",
++    "expected_daemon_version": "0.0.0-fake",
++    "source_revision": None,
++    "source_dirty": None,
++}
++
++
++def raw(
++    kind: str,
++    payload: dict | None = None,
++    *,
++    sequence: int = 1,
++    timestamp: str = "2026-09-09T10:00:00.000000000Z",
++    session_id: str = "ses_1",
++    turn_id: str = "turn_1",
++) -> str:
++    return json.dumps(
++        {
++            "schema_version": "1",
++            "sequence": sequence,
++            "timestamp": timestamp,
++            "kind": kind,
++            "session_id": session_id,
++            "turn_id": turn_id,
++            "item_id": None,
++            "payload": payload or {},
++        }
++    )
++
++
++def typed(kind: str, **fields: object) -> str:
++    return json.dumps({"schema_version": "1", "type": kind, "session_id": "ses_1", "turn_id": "turn_1", **fields})
++
++
++def created(*, instance_id: str | None = INSTANCE, version: str | None = "0.0.0-fake", identity: bool = True) -> str:
++    payload = {"status": "running", "item_id": "item_user"}
++    if identity:
++        payload["daemon"] = {"version": version, "instance_id": instance_id}
++    return raw("turn.created", payload, sequence=1)
++
++
++def call_completed(call: int, usage_events: int, input_units: int, output_units: int, *, sequence: int, outcome: str = "completed") -> str:
++    return raw(
++        "model.call.completed",
++        {
++            "model_call": call,
++            "usage_events": usage_events,
++            "input_tokens": input_units,
++            "output_tokens": output_units,
++            "accounted": usage_events > 0,
++            "outcome": outcome,
++        },
++        sequence=sequence,
++    )
++
++
++def completed_turn(*, input_units: int = 300, output_units: int = 30, calls: int = 2, model: str = "vendor/model-a") -> list[str]:
++    """A consistent stream: one accounted usage event per call whose sum equals the turn total."""
++
++    per_call = [(input_units // calls, output_units // calls)] * (calls - 1)
++    per_call.append((input_units - sum(units[0] for units in per_call), output_units - sum(units[1] for units in per_call)))
++    lines = [typed("turn.started"), created(), raw("model.route.selected", {"model_id": model}, sequence=2)]
++    for index, (input_tokens, output_tokens) in enumerate(per_call):
++        call = index + 1
++        lines.append(raw("model.usage", {"model_call": call, "input_tokens": input_tokens, "output_tokens": output_tokens}, sequence=10 + 2 * index))
++        lines.append(call_completed(call, 1, input_tokens, output_tokens, sequence=11 + 2 * index))
++    lines.append(raw("tool.completed", {"tool": "read_file"}, sequence=20))
++    lines.append(
++        raw(
++            "turn.usage",
++            {"model": model, "input_units": input_units, "output_units": output_units, "total_units": input_units + output_units, "model_calls": calls, "tool_calls": 1},
++            sequence=30,
++        )
++    )
++    lines.append(raw("turn.completed", {"status": "completed"}, sequence=31, timestamp="2026-09-09T10:00:01.500000000Z"))
++    return lines
++
++
++def verdict(lines: list[str], *, passed: bool = True, process: dict | None = None, service: dict | None = None, harness: dict | None = None):
++    """Reduce a synthetic stream exactly as the runner does and return (summary, reason)."""
++
++    summary = harness_run.summarize_events(lines)
++    usage = harness_run.usage_record(summary)
++    accounting = harness_run.accounting_record(summary)
++    reason = harness_run.exclusion_reason(
++        passed, {**PROCESS_OK, **(process or {})}, summary, usage, accounting, {**SERVICE_OK, **(service or {})}, {**HARNESS_OK, **(harness or {})}
++    )
++    return summary, accounting, reason
++
++
++class WorkRootTestCase(unittest.TestCase):
++    """Every test that writes beneath ``.work`` creates it first, so a fresh checkout passes."""
++
++    def setUp(self):
++        WORK_ROOT.mkdir(parents=True, exist_ok=True)
++
++
++class TimestampTests(unittest.TestCase):
++    def test_nanosecond_utc_and_offset_timestamps_parse(self):
++        base = harness_run.parse_timestamp("2026-09-09T10:00:00Z")
++        self.assertEqual(harness_run.parse_timestamp("2026-09-09T10:00:00.123456789Z"), base + 0.123456)
++        self.assertEqual(harness_run.parse_timestamp("2026-09-09T12:00:00+02:00"), base)
++        self.assertEqual(harness_run.parse_timestamp("2026-09-09T08:30:00.5-01:30"), base + 0.5)
++
++    def test_invalid_timestamps_are_ignored(self):
++        for value in (None, 12, "", "2026-09-09 10:00:00Z", "2026-13-01T00:00:00Z", "yesterday"):
++            with self.subTest(value=value):
++                self.assertIsNone(harness_run.parse_timestamp(value))
++
++
++class EventSummaryTests(unittest.TestCase):
++    def test_turn_usage_is_authoritative_and_cross_checked_against_per_call_events(self):
++        lines = completed_turn()
++        lines.insert(3, raw("context.compacted", {"omitted_messages": 3}, sequence=3))
++        summary, accounting, reason = verdict(lines)
++        usage = harness_run.usage_record(summary)
++        self.assertEqual(
++            usage,
++            {
++                "accounting": "sum_of_provider_usage_events",
++                "source": "turn.usage",
++                "input_units": 300,
++                "output_units": 30,
++                "model_calls": 2,
++                "tool_calls": 1,
++                "total_units": 330,
++                "model_usage_events": 2,
++                "model_usage_sum": {"input_units": 300, "output_units": 30},
++                "matches_model_usage_sum": True,
++            },
++        )
++        self.assertEqual(summary["status"], "completed")
++        self.assertEqual(summary["model"], "vendor/model-a")
++        self.assertEqual(summary["routed_models"], ["vendor/model-a"])
++        self.assertEqual(harness_run.effective_model(summary), "vendor/model-a")
++        self.assertEqual(summary["context_compactions"], 1)
++        self.assertEqual((summary["session_id"], summary["turn_id"]), ("ses_1", "turn_1"))
++        self.assertEqual(summary["daemon"], {"version": "0.0.0-fake", "instance_id": INSTANCE})
++        self.assertEqual(summary["total"], len(lines))
++        self.assertEqual(summary["malformed_lines"], 0)
++        self.assertEqual(summary["by_kind"]["model.usage"], 2)
++        self.assertAlmostEqual(summary["last_timestamp"] - summary["first_timestamp"], 1.5)
++        self.assertTrue(summary["lifecycle"]["valid"])
++        self.assertTrue(accounting["verified"])
++        self.assertIsNone(reason)
++
++    def test_turn_total_that_disagrees_with_per_call_events_is_flagged(self):
++        lines = completed_turn()
++        del lines[next(index for index, line in enumerate(lines) if json.loads(line).get("kind") == "model.usage")]
++        summary, accounting, reason = verdict(lines)
++        usage = harness_run.usage_record(summary)
++        self.assertEqual(usage["source"], "turn.usage")
++        self.assertFalse(usage["matches_model_usage_sum"])
++        self.assertFalse(accounting["verified"])
++        self.assertIn("model call 1 reports 1 usage events but 0 were streamed", reason)
++
++    def test_failed_turn_falls_back_to_summed_model_usage(self):
++        lines = [
++            typed("turn.started"),
++            raw("model.usage", {"input_tokens": 50, "output_tokens": 5}),
++            raw("model.usage", {"input_tokens": 60, "output_tokens": 6}, sequence=2),
++            typed("turn.failed", error_code="agent_failed"),
++        ]
++        summary = harness_run.summarize_events(lines)
++        usage = harness_run.usage_record(summary)
++        self.assertEqual(summary["status"], "failed")
++        self.assertEqual(summary["error_code"], "agent_failed")
++        self.assertEqual(usage["source"], "model.usage")
++        self.assertEqual((usage["input_units"], usage["output_units"], usage["total_units"]), (110, 11, 121))
++        self.assertIsNone(usage["model_calls"])
++        self.assertIsNone(usage["tool_calls"])
++        self.assertIsNone(usage["matches_model_usage_sum"])
++        self.assertEqual(summary["model_usage"]["unattributed_events"], 2)
++
++    def test_malformed_rows_are_counted_and_usage_can_be_missing(self):
++        lines = [
++            "not json",
++            "",
++            json.dumps({"kind": "model.usage", "payload": {"input_tokens": 1, "output_tokens": 1}}),
++            json.dumps(["schema_version", "1"]),
++            json.dumps({"schema_version": "2", "kind": "turn.completed"}),
++            json.dumps({"schema_version": "1", "payload": {}}),
++        ]
++        summary = harness_run.summarize_events(lines)
++        self.assertEqual(summary["total"], 0)
++        self.assertEqual(summary["malformed_lines"], 5)
++        self.assertEqual(summary["status"], "unknown")
++        usage = harness_run.usage_record(summary)
++        self.assertEqual(usage["source"], "missing")
++        self.assertIsNone(usage["total_units"])
++        self.assertIsNone(harness_run.effective_model(summary))
++
++    def test_invalid_turn_usage_counts_do_not_masquerade_as_provider_usage(self):
++        lines = [
++            typed("turn.started"),
++            raw("model.usage", {"input_tokens": 7, "output_tokens": 3}),
++            raw("turn.usage", {"model": "m", "input_units": -1, "output_units": "3", "model_calls": True, "tool_calls": 1}),
++            raw("turn.completed"),
++        ]
++        summary = harness_run.summarize_events(lines)
++        self.assertIsNone(summary["turn_usage"])
++        self.assertEqual(summary["model"], "m")
++        self.assertEqual(harness_run.usage_record(summary)["source"], "model.usage")
++
++    def test_approval_and_cancellation_rows_are_recorded(self):
++        lines = [
++            typed("turn.started"),
++            typed("approval.required", item_id="item_1", payload={"approval_id": "apr_1"}),
++            raw("model.route.selected", {"model_id": "a"}),
++            raw("model.route.fallback", {"from_model_id": "a", "to_model_id": "b"}, sequence=2),
++            raw("model.route.selected", {"model_id": "b"}, sequence=3),
++            typed("turn.cancelled"),
++        ]
++        summary = harness_run.summarize_events(lines)
++        self.assertEqual(summary["approvals_requested"], 1)
++        self.assertEqual(summary["route_fallbacks"], 1)
++        self.assertEqual(summary["routed_models"], ["a", "b"])
++        self.assertIsNone(harness_run.effective_model(summary))
++        self.assertEqual(summary["status"], "cancelled")
++
++
++class AccountingTests(unittest.TestCase):
++    """Comparable means every counted model call has complete, valid usage evidence."""
++
++    def test_all_calls_completely_accounted_are_comparable(self):
++        summary, accounting, reason = verdict(completed_turn(calls=3))
++        self.assertTrue(accounting["verified"])
++        self.assertEqual(accounting["model_calls"], 3)
++        self.assertEqual([call["call"] for call in accounting["calls"]], [1, 2, 3])
++        self.assertTrue(all(call["accounted"] and call["usage_events"] == 1 for call in accounting["calls"]))
++        self.assertIsNone(reason)
++
++    def test_two_calls_with_only_one_accounted_are_not_comparable(self):
++        # The reviewer's reproduction: two calls, one usage event, a turn total
++        # equal to that partial subtotal. The subtotal is kept, comparability is not.
++        lines = [
++            typed("turn.started"),
++            created(),
++            raw("model.usage", {"model_call": 1, "input_tokens": 200, "output_tokens": 20}, sequence=2),
++            call_completed(1, 1, 200, 20, sequence=3),
++            call_completed(2, 0, 0, 0, sequence=4),
++            raw("turn.usage", {"model": "m", "input_units": 200, "output_units": 20, "total_units": 220, "model_calls": 2, "tool_calls": 1}, sequence=5),
++            raw("turn.completed", sequence=6),
++        ]
++        summary, accounting, reason = verdict(lines)
++        usage = harness_run.usage_record(summary)
++        self.assertTrue(usage["matches_model_usage_sum"])
++        self.assertEqual(usage["total_units"], 220)
++        self.assertFalse(accounting["verified"])
++        self.assertEqual(accounting["reasons"], ["model call 2 has no provider usage"])
++        self.assertIn("accounting is incomplete", reason)
++        self.assertIn("model call 2 has no provider usage", reason)
++
++    def test_malformed_usage_counters_are_invalid_not_zero(self):
++        lines = completed_turn(calls=2)
++        bad = json.loads(lines[3])
++        bad["payload"]["input_tokens"] = "150"
++        lines[3] = json.dumps(bad)
++        summary, accounting, reason = verdict(lines)
++        self.assertEqual(summary["model_usage"]["invalid_events"], 1)
++        self.assertEqual(summary["model_usage"]["events"], 1)
++        self.assertEqual(summary["model_usage"]["input_units"], 150)
++        self.assertIn("1 usage rows carry missing or invalid counters", accounting["reasons"])
++        self.assertIn("model call 1 reports 1 usage events but 0 were streamed", accounting["reasons"])
++        self.assertIn("accounting is incomplete", reason)
++
++    def test_malformed_accounting_records_are_rejected(self):
++        for field, value in (("input_tokens", None), ("usage_events", -1), ("accounted", "yes"), ("outcome", 3), ("model_call", 0)):
++            with self.subTest(field=field):
++                lines = completed_turn(calls=1)
++                record = json.loads(lines[4])
++                record["payload"][field] = value
++                lines[4] = json.dumps(record)
++                summary, accounting, reason = verdict(lines)
++                self.assertEqual(summary["invalid_call_records"], 1)
++                self.assertFalse(accounting["verified"])
++                self.assertIn("accounting is incomplete", reason)
++
++    def test_several_usage_objects_for_one_call_are_accounted(self):
++        # An Anthropic-style stream reports usage at message_start and message_delta.
++        lines = [
++            typed("turn.started"),
++            created(),
++            raw("model.usage", {"model_call": 1, "input_tokens": 120, "output_tokens": 1}, sequence=2),
++            raw("model.usage", {"model_call": 1, "input_tokens": 0, "output_tokens": 29}, sequence=3),
++            call_completed(1, 2, 120, 30, sequence=4),
++            raw("turn.usage", {"model": "m", "input_units": 120, "output_units": 30, "total_units": 150, "model_calls": 1, "tool_calls": 0}, sequence=5),
++            raw("turn.completed", sequence=6),
++        ]
++        summary, accounting, reason = verdict(lines)
++        self.assertTrue(accounting["verified"])
++        self.assertEqual(accounting["calls"][0]["usage_events"], 2)
++        self.assertIsNone(reason)
++
++    def test_unattributed_duplicate_or_missing_records_are_not_verified(self):
++        lines = completed_turn(calls=2)
++        unattributed = json.loads(lines[3])
++        del unattributed["payload"]["model_call"]
++        lines[3] = json.dumps(unattributed)
++        summary, accounting, _ = verdict(lines)
++        self.assertIn("1 usage rows are not attributed to a model call", accounting["reasons"])
++
++        lines = completed_turn(calls=2)
++        lines.append(call_completed(2, 1, 150, 15, sequence=40))
++        summary, accounting, _ = verdict(lines)
++        self.assertIn("model call 2 has 2 accounting records", accounting["reasons"])
++
++        lines = completed_turn(calls=2)
++        total = json.loads(lines[-2])
++        total["payload"]["model_calls"] = 3
++        lines[-2] = json.dumps(total)
++        summary, accounting, reason = verdict(lines)
++        self.assertIn("the daemon counted 3 model calls but accounting records cover calls [1, 2]", accounting["reasons"])
++        self.assertIn("accounting is incomplete", reason)
++
++    def test_per_call_records_must_sum_to_the_turn_total(self):
++        lines = completed_turn(calls=2)
++        record = json.loads(lines[4])
++        record["payload"]["input_tokens"] = 1
++        lines[4] = json.dumps(record)
++        summary, accounting, _ = verdict(lines)
++        self.assertIn("the usage rows of model call 1 do not sum to its accounting record", accounting["reasons"])
++        self.assertIn("the per-call accounting does not sum to the turn usage", accounting["reasons"])
++
++
++class LifecycleTests(unittest.TestCase):
++    """The reducer binds every piece of evidence to one started, terminated turn."""
++
++    def assert_unbound(self, lines: list[str], fragment: str):
++        summary, _, reason = verdict(lines)
++        self.assertFalse(summary["lifecycle"]["valid"])
++        self.assertIn("event lifecycle is not bound to one turn", reason)
++        self.assertIn(fragment, reason)
++        return summary
++
++    def test_missing_turn_started_anchor_is_not_comparable(self):
++        lines = [line for line in completed_turn() if json.loads(line).get("type") != "turn.started"]
++        summary = self.assert_unbound(lines, "expected exactly one turn.started anchor, saw 0")
++        # Nothing is folded without an anchor, but every row is still counted.
++        self.assertEqual(summary["total"], len(lines))
++        self.assertEqual(summary["lifecycle"]["unbound_rows"], len(lines))
++        self.assertIsNone(summary["turn_usage"])
++
++    def test_two_anchors_or_a_late_anchor_are_not_comparable(self):
++        lines = completed_turn()
++        lines.insert(4, typed("turn.started"))
++        self.assert_unbound(lines, "saw 2")
++        lines = completed_turn()
++        lines.append(lines.pop(0))
++        summary = self.assert_unbound(lines, "rows precede the turn.started anchor")
++        self.assertEqual(summary["lifecycle"]["unbound_rows"], len(lines) - 1)
++
++    def test_usage_rows_from_another_turn_are_rejected(self):
++        lines = completed_turn(calls=1)
++        lines[3] = raw("model.usage", {"model_call": 1, "input_tokens": 300, "output_tokens": 30}, sequence=10, turn_id="turn_2")
++        summary = self.assert_unbound(lines, "1 rows carry another session or turn")
++        self.assertEqual(summary["model_usage"]["events"], 0)
++
++    def test_usage_rows_from_another_session_are_rejected(self):
++        lines = completed_turn(calls=1)
++        lines[3] = raw("model.usage", {"model_call": 1, "input_tokens": 300, "output_tokens": 30}, sequence=10, session_id="ses_2")
++        summary = self.assert_unbound(lines, "1 rows carry another session or turn")
++        self.assertEqual(summary["model_usage"]["events"], 0)
++
++    def test_completion_row_for_another_turn_is_rejected(self):
++        lines = completed_turn(calls=1)
++        lines[-1] = raw("turn.completed", {"status": "completed"}, sequence=31, turn_id="turn_2")
++        summary = self.assert_unbound(lines, "expected exactly one terminal turn event, saw 0")
++        self.assertEqual(summary["status"], "unknown")
++        lines = completed_turn(calls=1)
++        lines[-2] = raw("turn.usage", {"model": "m", "input_units": 300, "output_units": 30, "model_calls": 1, "tool_calls": 1}, sequence=30, session_id="ses_2")
++        summary = self.assert_unbound(lines, "1 rows carry another session or turn")
++        self.assertIsNone(summary["turn_usage"])
++
++    def test_contradictory_or_repeated_terminal_events_are_rejected(self):
++        lines = completed_turn(calls=1)
++        lines.append(typed("turn.failed", error_code="late_failure"))
++        summary = self.assert_unbound(lines, "expected exactly one terminal turn event, saw 2 (turn.completed, turn.failed)")
++        self.assertEqual(summary["status"], "conflicting")
++        lines = completed_turn(calls=1)
++        lines.append(raw("turn.completed", sequence=32))
++        summary = self.assert_unbound(lines, "saw 2 (turn.completed, turn.completed)")
++        self.assertEqual(summary["status"], "completed")
++
++    def test_consistent_lifecycle_is_comparable_when_every_other_gate_passes(self):
++        summary, accounting, reason = verdict(completed_turn())
++        self.assertTrue(summary["lifecycle"]["valid"])
++        self.assertEqual(summary["lifecycle"]["terminal"], ["turn.completed"])
++        self.assertIsNone(reason)
++
++    def test_unrelated_rows_from_another_turn_never_feed_counters(self):
++        lines = completed_turn(calls=1)
++        lines.insert(5, raw("context.compacted", {"omitted_messages": 3}, sequence=12, turn_id="turn_9"))
++        summary = self.assert_unbound(lines, "1 rows carry another session or turn")
++        self.assertEqual(summary["context_compactions"], 0)
++
++
++class ComparabilityTests(unittest.TestCase):
++    def setUp(self):
++        self.summary = harness_run.summarize_events(completed_turn())
++        self.usage = harness_run.usage_record(self.summary)
++        self.accounting = harness_run.accounting_record(self.summary)
++
++    def reason(self, *, passed=True, process=None, summary=None, usage=None, accounting=None, service=None, harness=None):
++        return harness_run.exclusion_reason(
++            passed,
++            {**PROCESS_OK, **(process or {})},
++            {**self.summary, **(summary or {})},
++            {**self.usage, **(usage or {})},
++            {**self.accounting, **(accounting or {})},
++            {**SERVICE_OK, **(service or {})},
++            {**HARNESS_OK, **(harness or {})},
++        )
++
++    def test_outcome_is_checked_before_turn_process_and_usage(self):
++        self.assertIsNone(self.reason())
++        self.assertIn("grader rejected", self.reason(passed=False, process={"timed_out": True}))
++        self.assertIn("timeout", self.reason(process={"timed_out": True, "exit_code": -9}))
++        self.assertIn("status failed", self.reason(summary={"status": "failed"}, process={"exit_code": 1}))
++        self.assertIn("exited with status 1", self.reason(process={"exit_code": 1}))
++
++    def test_incomplete_or_inconsistent_evidence_is_never_comparable(self):
++        self.assertIn("incomplete", self.reason(process={"events_truncated": True}))
++        self.assertIn("incomplete", self.reason(summary={"malformed_lines": 1}))
++        self.assertIn("no turn usage", self.reason(usage={"source": "model.usage"}))
++        self.assertIn("no turn usage", self.reason(usage={"source": "missing"}))
++        self.assertIn("provider reported no usage", self.reason(usage={"model_usage_events": 0}))
++        self.assertIn("provider reported no usage", self.reason(usage={"total_units": 0}))
++        self.assertIn("accounting is incomplete: x", self.reason(accounting={"verified": False, "reasons": ["x"]}))
++        self.assertIn("does not match", self.reason(usage={"matches_model_usage_sum": False}))
++
++    def test_route_changes_are_never_silently_compared(self):
++        self.assertIn("route changed", self.reason(summary={"route_fallbacks": 1}))
++        self.assertIn("route changed", self.reason(summary={"routed_models": ["a", "b"]}))
++
++    def test_daemon_identity_gates_comparability(self):
++        self.assertIn("could not be verified: no file", self.reason(service={"reason": "no file"}))
++        self.assertIn("carries no daemon identity", self.reason(summary={"daemon": None}))
++        self.assertIn("carries no daemon identity", self.reason(summary={"daemon": {"version": "0.0.0-fake", "instance_id": None}}))
++        self.assertIn("executed by a daemon other than the isolated service", self.reason(service={"instance_id": "inst_other"}))
++        self.assertIn("version 0.0.0-fake does not match", self.reason(harness={"expected_daemon_version": "0.0.1"}))
++        self.assertIn("does not match", self.reason(harness={"expected_daemon_version": None}))
++        self.assertIsNone(self.reason(service={"pid_alive_after_run": True, "stopped": True}))
++
++
++class ServiceTests(WorkRootTestCase):
++    """The run owns the daemon that executes it and can tell when it did not."""
++
++    def setUp(self):
++        super().setUp()
++        self.task = Path(tempfile.mkdtemp(prefix="harness-service-test.", dir=WORK_ROOT))
++        self.addCleanup(shutil.rmtree, self.task, True)
++
++    def connection(self, **fields: object) -> dict:
++        runtime = self.task / "service/runtime"
++        runtime.mkdir(parents=True, exist_ok=True)
++        content = {"schema_version": 1, "daemon_url": "http://127.0.0.1:1", "token": "t", "instance_id": INSTANCE, "pid": 2**22 + 1, "started_at": "2026-09-09T10:00:00Z", **fields}
++        (runtime / "daemon.json").write_text(json.dumps(content), encoding="utf-8")
++        return {"runtime": runtime}
++
++    def test_prepare_service_isolates_the_environment_and_never_copies_config(self):
++        config = self.task / "config.toml"
++        config.write_text("[model]\nprovider = 'x'\n", encoding="utf-8")
++        stale_home = self.task / "stale-home"
++        (stale_home / "run").mkdir(parents=True)
++        (stale_home / "run/daemon.json").write_text("{}", encoding="utf-8")
++        inherited = {"S_CODE_URL": "http://127.0.0.1:9/", "S_CODE_TOKEN": "stale", "S_CODE_NO_AUTOSTART": "1", "S_CODE_HOME": str(stale_home), "S_CODE_RUNTIME_DIR": str(stale_home / "run"), "S_CODE_STATE_DIR": str(stale_home / "state")}
++        saved = {name: os.environ.get(name) for name in (*inherited, "S_CODE_CONFIG")}
++        os.environ.update(inherited)
++        os.environ.pop("S_CODE_CONFIG", None)
++        try:
++            output = self.task / "run"
++            output.mkdir()
++            environment, directories, record = harness_run.prepare_service(output, harness_run.service_config(str(config)))
++        finally:
++            for name, value in saved.items():
++                if value is None:
++                    os.environ.pop(name, None)
++                else:
++                    os.environ[name] = value
++        for name in ("S_CODE_URL", "S_CODE_TOKEN", "S_CODE_NO_AUTOSTART"):
++            self.assertNotIn(name, environment)
++        self.assertEqual(environment["S_CODE_HOME"], str(output / "service/home"))
++        self.assertEqual(environment["S_CODE_RUNTIME_DIR"], str(output / "service/runtime"))
++        self.assertEqual(environment["S_CODE_STATE_DIR"], str(output / "service/state"))
++        self.assertEqual(environment["S_CODE_DAEMON_LISTEN"], "127.0.0.1:0")
++        self.assertEqual(environment["S_CODE_CONFIG"], str(config))
++        self.assertEqual(record, {"source": "argument", "sha256": harness_run.hashlib.sha256(config.read_bytes()).hexdigest()})
++        for directory in directories.values():
++            self.assertTrue(directory.is_dir())
++            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
++            self.assertEqual(list(directory.iterdir()), [])
++        self.assertTrue((stale_home / "run/daemon.json").is_file())
++
++    def test_inspect_service_reads_only_a_fresh_connection_from_the_run(self):
++        started = harness_run.parse_timestamp("2026-09-09T10:00:00Z")
++        service, pid = harness_run.inspect_service({"runtime": self.task / "service/runtime"}, started)
++        self.assertEqual(service["reason"], "the isolated service published no connection file")
++        self.assertIsNone(pid)
++        directories = self.connection()
++        (directories["runtime"] / "daemon.json").write_text("not json", encoding="utf-8")
++        service, _ = harness_run.inspect_service(directories, started)
++        self.assertEqual(service["reason"], "the isolated service connection file is unreadable")
++        directories = self.connection(started_at="2026-09-09T09:00:00Z")
++        service, _ = harness_run.inspect_service(directories, started)
++        self.assertEqual(service["reason"], "the isolated service connection predates this run")
++        directories = self.connection(instance_id="")
++        service, _ = harness_run.inspect_service(directories, started)
++        self.assertEqual(service["reason"], "the isolated service published no instance id")
++        directories = self.connection()
++        service, pid = harness_run.inspect_service(directories, started)
++        self.assertIsNone(service["reason"])
++        self.assertEqual(service["instance_id"], INSTANCE)
++        self.assertEqual(pid, 2**22 + 1)
++        self.assertFalse(service["pid_alive_after_run"])
++        self.assertNotIn("pid", service)
++
++    def test_stop_service_terminates_only_a_live_daemon(self):
++        self.assertIsNone(harness_run.stop_service(None))
++        self.assertIsNone(harness_run.stop_service(2**22 + 1))
++        # The launcher detaches the daemon with nohup, so stop it the same way:
++        # as a process that is not the runner's own child.
++        detached = int(subprocess.run(["sh", "-c", "sleep 60 >/dev/null 2>&1 & echo $!"], check=True, text=True, capture_output=True).stdout.strip())
++        try:
++            self.assertTrue(harness_run.process_alive(detached))
++            self.assertTrue(harness_run.stop_service(detached))
++            self.assertFalse(harness_run.process_alive(detached))
++        finally:
++            harness_run.stop_service(detached)
++        # A child of the runner itself is reaped rather than left as a zombie.
++        child = subprocess.Popen(["sleep", "60"])
++        self.assertTrue(harness_run.stop_service(child.pid))
++        self.assertFalse(harness_run.process_alive(child.pid))
++
++
++class PromptTests(unittest.TestCase):
++    def setUp(self):
++        self.manifest = harness_run.load_manifest()
++
++    def test_project_prompt_points_at_the_frozen_readme_and_paths(self):
++        task = harness_run.find_task(self.manifest, "project", "durable-task-queue")
++        prompt = harness_run.compose_prompt("project", task)
++        self.assertEqual(prompt, harness_run.compose_prompt("project", task))
++        self.assertIn("README.md in the current workspace", prompt)
++        self.assertIn("Only create or modify these paths: durable_queue.", prompt)
++        self.assertIn("including: README.md, tests.", prompt)
++        self.assertIn("`python3 -m unittest discover -s tests -v`", prompt)
++        self.assertTrue(prompt.endswith("\n"))
++
++    def test_algorithm_prompt_names_the_implementation_and_test_file(self):
++        task = harness_run.find_task(self.manifest, "algorithm", "wordy")
++        prompt = harness_run.compose_prompt("algorithm", task)
++        self.assertIn("Implement wordy.py", prompt)
++        self.assertIn("every test in wordy_test.py passes", prompt)
++        self.assertIn("`python3 -m unittest -v wordy_test.py`", prompt)
++        self.assertNotIn("README.md", prompt)
++
++
++class DrainTests(WorkRootTestCase):
++    def test_output_is_bounded_and_the_pipe_is_still_drained(self):
++        with tempfile.TemporaryDirectory(dir=WORK_ROOT) as directory:
++            destination = Path(directory) / "out"
++            result: dict = {"truncated": False, "bytes": 0}
++            harness_run.drain(io.BytesIO(b"x" * 100_000), destination, 10, result)
++            self.assertEqual(destination.read_bytes(), b"x" * 10)
++            self.assertEqual(result, {"truncated": True, "bytes": 10})
++            result = {"truncated": False, "bytes": 0}
++            harness_run.drain(io.BytesIO(b"y" * 100), destination, 1_000, result)
++            self.assertEqual(destination.read_bytes(), b"y" * 100)
++            self.assertEqual(result, {"truncated": False, "bytes": 100})
++
++
++class BytecodeCacheTests(WorkRootTestCase):
++    def test_only_pure_bytecode_caches_are_removed(self):
++        with tempfile.TemporaryDirectory(dir=WORK_ROOT) as directory:
++            workspace = Path(directory)
++            for cache in ("tests/__pycache__", "pkg/__pycache__", ".git/__pycache__", "mixed/__pycache__", "nested/__pycache__"):
++                (workspace / cache).mkdir(parents=True)
++                (workspace / cache / "module.cpython-312.pyc").write_bytes(b"\x00")
++            (workspace / "mixed/__pycache__/notes.txt").write_text("keep")
++            (workspace / "nested/__pycache__/inner").mkdir()
++            (workspace / "pkg/module.py").write_text("SOURCE = 1\n")
++            (workspace / "not_a_cache").mkdir()
++            (workspace / "not_a_cache/data.pyc").write_bytes(b"\x00")
++            removed = harness_run.remove_bytecode_caches(workspace)
++            self.assertEqual(removed, ["pkg/__pycache__", "tests/__pycache__"])
++            for kept in (".git/__pycache__", "mixed/__pycache__/notes.txt", "nested/__pycache__/inner", "pkg/module.py", "not_a_cache/data.pyc"):
++                self.assertTrue((workspace / kept).exists(), kept)
++            self.assertFalse((workspace / "tests/__pycache__").exists())
++
++
++class RunIntegrationTests(WorkRootTestCase):
++    """Drive the script as a subprocess against a fake S-Code executable."""
++
++    def setUp(self):
++        super().setUp()
++        self.task = Path(tempfile.mkdtemp(prefix="harness-run-test.", dir=WORK_ROOT))
++        self.addCleanup(shutil.rmtree, self.task, True)
++        # A caller's environment that points at an existing, possibly stale,
++        # daemon: the runner must never let the measured turn reach it.
++        stale_home = self.task / "stale-home"
++        (stale_home / "run").mkdir(parents=True)
++        (stale_home / "run/daemon.json").write_text(json.dumps({"instance_id": "inst_stale", "pid": 1}), encoding="utf-8")
++        self.stale_environment = {
++            "S_CODE_URL": "http://127.0.0.1:9/",
++            "S_CODE_TOKEN": "stale-token",
++            "S_CODE_NO_AUTOSTART": "1",
++            "S_CODE_HOME": str(stale_home),
++            "S_CODE_RUNTIME_DIR": str(stale_home / "run"),
++            "S_CODE_STATE_DIR": str(stale_home / "state"),
++        }
++
++    def fake_binary(self, body: str) -> Path:
++        path = self.task / "s-code"
++        path.write_text(FAKE_SCRIPT + body, encoding="utf-8")
++        path.chmod(0o755)
++        return path
++
++    def run_script(self, *arguments: str, env: dict | None = None) -> subprocess.CompletedProcess:
++        environment = dict(os.environ)
++        environment.pop("S_CODE_CONFIG", None)
++        environment.update(self.stale_environment)
++        environment.update(env or {})
++        return subprocess.run(
++            [sys.executable, str(SCRIPT), *arguments],
++            check=False,
++            text=True,
++            capture_output=True,
++            env=environment,
++            cwd=self.task,
++        )
++
++    def common_arguments(self, name: str, *extra: str) -> list[str]:
++        return [
++            "--track", "project", "--task", "durable-task-queue",
++            "--s-code", str(self.task / "s-code"), "--output", str(self.task / name),
++            "--timeout", "30", "--grace-seconds", "1", "--grader-timeout", "60", *extra,
++        ]
++
++    def test_completed_turn_is_recorded_and_graded_by_outcome(self):
++        events = "\n".join(completed_turn(input_units=120, output_units=30, calls=1)) + "\n"
++        (self.task / "events.txt").write_text(events, encoding="utf-8")
++        self.fake_binary(
++            "printf 'VERSION = \"fake\"\\n' > durable_queue/candidate.py\n"
++            "mkdir -p tests/__pycache__ && printf 'x' > tests/__pycache__/test_durable_queue.cpython-312.pyc\n"
++            'cat "$FAKE_EVENTS"\n'
++        )
++        completed = self.run_script(*self.common_arguments("run-1", "--model", "vendor/model-a"), env={"FAKE_EVENTS": str(self.task / "events.txt")})
++        self.assertEqual(completed.returncode, 2, completed.stderr)
++        output = self.task / "run-1"
++        record = json.loads((output / "run.json").read_text(encoding="utf-8"))
++        summary = json.loads(completed.stdout)
++        self.assertEqual(summary["record"], str(output / "run.json"))
++        self.assertEqual(summary["total_units"], 150)
++        self.assertEqual(record["schema_version"], 2)
++        self.assertEqual(record["kind"], "harness_benchmark_run")
++        self.assertEqual(record["harness"]["name"], "s-code")
++        self.assertEqual(record["harness"]["version"], "s-code 0.0.0-fake")
++        self.assertEqual(record["harness"]["expected_daemon_version"], "0.0.0-fake")
++        task = harness_run.find_task(harness_run.load_manifest(), "project", "durable-task-queue")
++        self.assertEqual(record["task"], {"track": "project", "id": "durable-task-queue", "protected_sha256": task["protected_sha256"]})
++        self.assertEqual(record["configuration"]["model"], "vendor/model-a")
++        self.assertEqual(record["configuration"]["permission_mode"], "workspace")
++        self.assertEqual(record["configuration"]["timeout_seconds"], 30)
++        self.assertEqual(record["configuration"]["service_config"], {"source": "none", "sha256": None})
++        self.assertEqual(record["process"], PROCESS_OK)
++        self.assertEqual(record["turn"]["status"], "completed")
++        self.assertEqual(record["turn"]["model"], "vendor/model-a")
++        self.assertEqual(record["turn"]["effective_model"], "vendor/model-a")
++        self.assertEqual(record["turn"]["elapsed_seconds"], 1.5)
++        self.assertEqual(record["usage"]["source"], "turn.usage")
++        self.assertEqual((record["usage"]["input_units"], record["usage"]["output_units"], record["usage"]["total_units"]), (120, 30, 150))
++        self.assertTrue(record["usage"]["matches_model_usage_sum"])
++        self.assertTrue(record["usage"]["accounting_verified"])
++        self.assertTrue(record["accounting"]["verified"])
++        self.assertEqual(record["accounting"]["calls"], [{"call": 1, "usage_events": 1, "input_units": 120, "output_units": 30, "accounted": True, "outcome": "completed"}])
++        self.assertTrue(record["lifecycle"]["valid"])
++        self.assertEqual(record["events"]["total"], 8)
++        self.assertEqual(record["events"]["malformed_lines"], 0)
++        self.assertEqual(record["workspace_normalization"], {"removed_bytecode_caches": ["tests/__pycache__"]})
++        # The fake published its own connection file into the run's runtime
++        # directory and stamped the same instance into turn.created, so the
++        # daemon identity is verified even though the outcome fails the run.
++        service = record["service"]
++        self.assertTrue(service["isolated"])
++        self.assertTrue(service["connection_file"])
++        self.assertEqual(service["instance_id"], INSTANCE)
++        self.assertEqual(service["daemon_instance_id"], INSTANCE)
++        self.assertEqual(service["daemon_version"], "0.0.0-fake")
++        self.assertTrue(service["identity_verified"])
++        self.assertIsNone(service["reason"])
++        self.assertFalse(service["pid_alive_after_run"])
++        self.assertIsNone(service["stopped"])
++        # Outcome is primary: the fake candidate does not implement the task, so the
++        # unchanged grader ran the protected tests and rejected the workspace.
++        self.assertFalse(record["passed"])
++        self.assertFalse(record["comparable"])
++        self.assertIn("grader rejected", record["exclusion_reason"])
++        self.assertEqual(record["grader"]["observed_tests"], record["grader"]["expected_tests"])
++        self.assertEqual(record["grader"]["trust_model"], "trusted_workspace_only")
++        self.assertEqual(json.loads((output / "grade.json").read_text(encoding="utf-8")), record["grader"])
++        self.assertEqual((output / "events.jsonl").read_text(encoding="utf-8"), events)
++        self.assertEqual((output / "prompt.txt").read_text(encoding="utf-8"), harness_run.compose_prompt("project", task))
++        self.assertTrue((output / "grade.log").is_file())
++        self.assertTrue((output / "workspace/.git").is_dir())
++        stderr = (output / "s-code.stderr.log").read_text(encoding="utf-8")
++        self.assertIn(f"cwd={(output / 'workspace').resolve()}\n", stderr)
++        self.assertIn(f"workspace={(output / 'workspace').resolve().as_uri()}\n", stderr)
++        # Isolation: the measured process saw only the run's own service
++        # namespace, never the caller's daemon, token or autostart override.
++        self.assertIn(f"home={(output / 'service/home').resolve()}\n", stderr)
++        self.assertIn(f"runtime={(output / 'service/runtime').resolve()}\n", stderr)
++        self.assertIn(f"state={(output / 'service/state').resolve()}\n", stderr)
++        self.assertIn("url=unset\ntoken=unset\nautostart=unset\nconfig=unset\nlisten=127.0.0.1:0\n", stderr)
++        self.assertIn("args=exec --stream-json --ephemeral --permission-mode workspace --timeout 30 --model vendor/model-a -- Complete the task described in README.md", stderr)
++        self.assertEqual(json.loads((self.task / "stale-home/run/daemon.json").read_text(encoding="utf-8"))["instance_id"], "inst_stale")
++        self.assertNotIn(str(self.task), json.dumps({key: value for key, value in record.items() if key != "grader"}))
++        self.assertNotIn(str(self.task), json.dumps(record["grader"]))
++        self.assertNotIn("stale-token", json.dumps(record))
++
++    def test_turn_run_by_another_daemon_is_recorded_but_not_verified(self):
++        cases = {
++            "mismatched": (completed_turn(calls=1), {"FAKE_INSTANCE": "inst_other_0123456789abcdef"}, "executed by a daemon other than the isolated service"),
++            "missing-identity": ([typed("turn.started"), created(identity=False), *completed_turn(calls=1)[2:]], {}, "carries no daemon identity"),
++            "no-connection": (completed_turn(calls=1), {"FAKE_CONNECTION": "0"}, "published no connection file"),
++            "wrong-version": ([typed("turn.started"), created(version="9.9.9"), *completed_turn(calls=1)[2:]], {}, "version 9.9.9 does not match"),
++        }
++        for name, (lines, env, fragment) in cases.items():
++            with self.subTest(name=name):
++                (self.task / f"{name}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
++                self.fake_binary('cat "$FAKE_EVENTS"\n')
++                completed = self.run_script(*self.common_arguments(name), env={"FAKE_EVENTS": str(self.task / f"{name}.txt"), **env})
++                self.assertEqual(completed.returncode, 2, completed.stderr)
++                record = json.loads((self.task / name / "run.json").read_text(encoding="utf-8"))
++                self.assertFalse(record["service"]["identity_verified"])
++                self.assertFalse(record["comparable"])
++                self.assertTrue(record["lifecycle"]["valid"])
++                self.assertEqual(record["usage"]["total_units"], 330)
++                self.assertIn("grader rejected", record["exclusion_reason"])
++                summary = harness_run.summarize_events(lines)
++                self.assertIn(fragment, harness_run.service_reason(record["service"], summary, record["harness"]))
++
++    def test_isolated_service_left_running_is_stopped_after_the_run(self):
++        (self.task / "events.txt").write_text("\n".join(completed_turn(calls=1)) + "\n", encoding="utf-8")
++        self.fake_binary(
++            "sleep 300 >/dev/null 2>&1 &\n"
++            'printf \'{"schema_version":1,"daemon_url":"http://127.0.0.1:1","token":"fake","instance_id":"%s","pid":%s,"started_at":"%s"}\\n\' '
++            '"inst_fake_0123456789abcdef" "$!" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$S_CODE_RUNTIME_DIR/daemon.json"\n'
++            'printf \'%s\\n\' "$!" > "$S_CODE_RUNTIME_DIR/child.pid"\n'
++            'cat "$FAKE_EVENTS"\n'
++        )
++        completed = self.run_script(*self.common_arguments("run-stop"), env={"FAKE_EVENTS": str(self.task / "events.txt")})
++        self.assertEqual(completed.returncode, 2, completed.stderr)
++        record = json.loads((self.task / "run-stop/run.json").read_text(encoding="utf-8"))
++        self.assertTrue(record["service"]["identity_verified"])
++        self.assertTrue(record["service"]["pid_alive_after_run"])
++        self.assertTrue(record["service"]["stopped"])
++        child = int((self.task / "run-stop/service/runtime/child.pid").read_text().strip())
++        self.assertFalse(harness_run.process_alive(child))
++
++    def test_failed_turn_keeps_partial_usage_and_is_not_comparable(self):
++        events = "\n".join(
++            [
++                typed("turn.started"),
++                raw("model.usage", {"input_tokens": 40, "output_tokens": 4}),
++                typed("turn.failed", error_code="turn_elapsed_timeout"),
++            ]
++        ) + "\n"
++        (self.task / "events.txt").write_text(events, encoding="utf-8")
++        self.fake_binary('cat "$FAKE_EVENTS"\nexit 1\n')
++        completed = self.run_script(*self.common_arguments("run-2"), env={"FAKE_EVENTS": str(self.task / "events.txt")})
++        self.assertEqual(completed.returncode, 2, completed.stderr)
++        record = json.loads((self.task / "run-2/run.json").read_text(encoding="utf-8"))
++        self.assertEqual(record["process"]["exit_code"], 1)
++        self.assertEqual(record["turn"]["status"], "failed")
++        self.assertEqual(record["turn"]["error_code"], "turn_elapsed_timeout")
++        self.assertEqual(record["usage"]["source"], "model.usage")
++        self.assertEqual(record["usage"]["total_units"], 44)
++        self.assertFalse(record["accounting"]["verified"])
++        self.assertIsNone(record["configuration"]["model"])
++        self.assertFalse(record["comparable"])
++        self.assertEqual(record["workspace_normalization"]["removed_bytecode_caches"], [])
++
++    def test_hung_process_is_killed_after_the_grace_period(self):
++        self.fake_binary("exec sleep 60\n")
++        completed = self.run_script(*self.common_arguments("run-3", "--timeout", "1"))
++        self.assertEqual(completed.returncode, 2, completed.stderr)
++        record = json.loads((self.task / "run-3/run.json").read_text(encoding="utf-8"))
++        self.assertTrue(record["process"]["timed_out"])
++        self.assertLess(record["elapsed_seconds"], 20)
++        self.assertNotEqual(record["process"]["exit_code"], 0)
++        self.assertEqual(record["turn"]["status"], "unknown")
++        self.assertEqual(record["usage"]["source"], "missing")
++        self.assertFalse(record["lifecycle"]["valid"])
++        self.assertFalse(record["comparable"])
++
++    def test_invalid_invocations_fail_before_touching_the_workspace(self):
++        self.fake_binary("exit 0\n")
++        outside = Path(tempfile.gettempdir()) / "harness-run-outside"
++        cases = [
++            (["--output", str(outside)], "beneath .work/"),
++            (["--s-code", str(self.task / "missing")], "not an executable file"),
++            (["--task", "no-such-task"], "unknown project task"),
++            (["--service-config", str(self.task / "missing.toml")], "not a regular file"),
++        ]
++        for override, message in cases:
++            with self.subTest(message=message):
++                completed = self.run_script(*self.common_arguments("run-invalid"), *override)
++                self.assertEqual(completed.returncode, 2)
++                self.assertIn(message, completed.stderr)
++                self.assertFalse((self.task / "run-invalid").exists())
++        self.assertFalse(outside.exists())
++
++
++if __name__ == "__main__":
++    unittest.main()
