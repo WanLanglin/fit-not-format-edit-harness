@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://wanlanglin.github.io/fit-not-format-edit-harness/sitemap.xml

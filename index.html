@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fit, not format — how the edit interface shapes coding agents (Physics of Coding Agents, Part 1)</title>
+<meta name="description" content="Coding agents edit code by pointing at line numbers or quoting the code (search/replace, patch, apply_patch). Across six models and 4,700+ runs, the edit format barely changes task success but decides cost and silent errors. Verified selection: line ranges checked by quoting the two boundary lines.">
+<meta name="keywords" content="coding agents, LLM agents, edit format, edit interface, agent harness, search/replace, apply_patch, unified diff, line numbers, tool calling, S-Code, verified selection, SWE-agent, Aider">
+<link rel="canonical" href="https://wanlanglin.github.io/fit-not-format-edit-harness/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Fit, not format: the edit interface of coding agents">
+<meta property="og:description" content="Pointing at line numbers vs quoting code: same tasks solved, very different cost and silent errors. Physics of Coding Agents, Part 1.">
+<meta property="og:image" content="https://wanlanglin.github.io/fit-not-format-edit-harness/assets/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://wanlanglin.github.io/fit-not-format-edit-harness/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Fit, not format: the edit interface of coding agents">
+<meta name="twitter:description" content="Same tasks solved, very different cost and silent errors. Verified selection: point with line numbers, quote only the two ends.">
+<meta name="twitter:image" content="https://wanlanglin.github.io/fit-not-format-edit-harness/assets/img/og.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='11' r='7' fill='%230a5fd4'/><path d='M16 18v11' stroke='%231b1b1f' stroke-width='3' stroke-linecap='round'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Noto+Sans+SC:wght@400;600&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/site.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ScholarlyArticle",
+  "headline": "Physics of Coding Agents: Part 1, Fit, Not Format at the Edit Interface",
+  "author": [
+    {"@type": "Person", "name": "Langlin Wan", "affiliation": "Carnegie Mellon University"},
+    {"@type": "Person", "name": "Zhixuan Liang", "affiliation": "Princeton University"},
+    {"@type": "Person", "name": "Guangyuan Wang", "affiliation": ["McGill University", "Mila - Quebec AI Institute"]},
+    {"@type": "Person", "name": "Shilong Liu", "affiliation": ["Princeton University", "Columbia University"]}
+  ],
+  "datePublished": "2026-10",
+  "sameAs": "https://doi.org/10.20944/preprints202610.1889.v1",
+  "keywords": "coding agents, edit format, agent harness, search/replace, line numbers, verified selection",
+  "image": "https://wanlanglin.github.io/fit-not-format-edit-harness/assets/img/og.png"
+}
+</script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Fit, not format">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="5.5" fill="var(--accent)"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="6.4" r="1.6" fill="#fff" opacity=".8"/></svg>
+      Fit, not format
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#puzzle"><span lang="en">Puzzle</span><span lang="zh">谜题</span></a>
+      <a href="#cost"><span lang="en">Cost</span><span lang="zh">成本</span></a>
+      <a href="#evidence"><span lang="en">Evidence</span><span lang="zh">证据</span></a>
+      <a href="#fit"><span lang="en">Fit</span><span lang="zh">契合</span></a>
+      <a href="#method"><span lang="en">Method</span><span lang="zh">方法</span></a>
+      <a href="#results"><span lang="en">Results</span><span lang="zh">结果</span></a>
+      <a href="#cite"><span lang="en">Cite</span><span lang="zh">引用</span></a>
+    </nav>
+    <div class="spacer"></div>
+    <a class="star" href="https://github.com/sai-foundation/s-code" target="_blank" rel="noopener" title="S-Code: the open-source coding-agent harness behind every run">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .67.42l1.88 3.8 4.2.61a.75.75 0 0 1 .41 1.28l-3.04 2.96.72 4.18a.75.75 0 0 1-1.09.79L8 12.33l-3.75 1.96a.75.75 0 0 1-1.09-.79l.72-4.18L.84 6.36a.75.75 0 0 1 .41-1.28l4.2-.61L7.33.67A.75.75 0 0 1 8 .25Z"/></svg>
+      S-Code<span class="label-long">&nbsp;harness</span><span class="count" data-stars="sai-foundation/s-code">★</span>
+    </a>
+    <div class="seg" role="group" aria-label="Language">
+      <button data-setlang="en" aria-pressed="true">EN</button>
+      <button data-setlang="zh" class="zh" aria-pressed="false">中文</button>
+    </div>
+    <button class="iconbtn" id="theme" aria-label="Toggle dark mode">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- the page has a gutter: a pin marks the section you are reading -->
+<nav class="rail" aria-hidden="true">
+  <a href="#puzzle"><span class="ln">01</span><svg class="pin" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5" fill="currentColor"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="nm"><span lang="en">The puzzle</span><span lang="zh">谜题</span></span></a>
+  <a href="#cost"><span class="ln">02</span><svg class="pin" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5" fill="currentColor"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="nm"><span lang="en">Hidden cost</span><span lang="zh">隐藏的成本</span></span></a>
+  <a href="#evidence"><span class="ln">03</span><svg class="pin" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5" fill="currentColor"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="nm"><span lang="en">Evidence</span><span lang="zh">证据与可见性</span></span></a>
+  <a href="#fit"><span class="ln">04</span><svg class="pin" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5" fill="currentColor"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="nm"><span lang="en">Fit &amp; habit</span><span lang="zh">契合与习惯</span></span></a>
+  <a href="#method"><span class="ln">05</span><svg class="pin" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5" fill="currentColor"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="nm"><span lang="en">Verified selection</span><span lang="zh">校验选区</span></span></a>
+  <a href="#results"><span class="ln">06</span><svg class="pin" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5" fill="currentColor"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="nm"><span lang="en">Results</span><span lang="zh">结果</span></span></a>
+  <a href="#lessons"><span class="ln">07</span><svg class="pin" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5" fill="currentColor"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="nm"><span lang="en">Takeaways</span><span lang="zh">启示</span></span></a>
+  <a href="#cite"><span class="ln">08</span><svg class="pin" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5" fill="currentColor"/><path d="M12 13.5V22" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="nm"><span lang="en">Cite</span><span lang="zh">引用</span></span></a>
+</nav>
+
+<main id="top">
+
+<!-- ======================= HERO ======================= -->
+<section class="hero">
+  <div class="wrap">
+    <div class="stagger">
+      <div class="eyebrow">Physics of Coding Agents · Part 1</div>
+      <h1 class="title"><span lang="en"><span class="fit">Fit</span>, <em>not</em> format.</span><span lang="zh">重在<span class="fit">契合</span>，<em>不在</em>格式。</span></h1>
+      <p class="subtitle">
+        <span lang="en">A coding agent changes code by telling its harness where an edit goes: it points at line numbers, or it quotes the code. That choice decides what the agent loop pays, and which errors anyone ever sees.</span>
+        <span lang="zh">编程智能体改代码时，要告诉 harness 改在哪里：要么指行号，要么把原文引出来。这个选择决定了 agent 循环要付出多少代价，也决定了哪些错误能被看见。</span>
+      </p>
+      <p class="authors"><span class="nm">Langlin Wan<sup>1</sup></span>, <span class="nm">Zhixuan Liang<sup>2</sup></span>, <span class="nm">Guangyuan Wang<sup>3,4</sup></span>, <span class="nm">Shilong Liu<sup>2,5,*</sup></span></p>
+      <p class="affil"><span class="nm"><sup>1</sup>Carnegie Mellon University</span> &nbsp;<span class="nm"><sup>2</sup>Princeton University</span> &nbsp;<span class="nm"><sup>3</sup>McGill University</span> &nbsp;<span class="nm"><sup>4</sup>Mila – Quebec AI Institute</span> &nbsp;<span class="nm"><sup>5</sup>Columbia University</span> &nbsp;<span class="nm"><sup>*</sup><span lang="en">corresponding</span><span lang="zh">通讯作者</span></span></p>
+      <div class="btns">
+        <a class="btn primary" href="assets/paper.pdf" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+          <span lang="en">Paper (PDF)</span><span lang="zh">论文 PDF</span>
+        </a>
+        <a class="btn" href="https://doi.org/10.20944/preprints202610.1889.v1" target="_blank" rel="noopener">
+          <span lang="en">Preprint</span><span lang="zh">预印本</span>
+        </a>
+        <a class="btn" href="https://github.com/WanLanglin/fit-not-format-edit-harness" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span lang="en">Code &amp; data</span><span lang="zh">代码与数据</span>
+        </a>
+        <a class="btn" href="https://github.com/sai-foundation/s-code" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>
+          <span lang="en">S-Code harness</span><span lang="zh">S-Code harness</span>
+        </a>
+        <a class="btn" href="#video">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          <span lang="en">90-second video</span><span lang="zh">90 秒视频</span>
+        </a>
+        <a class="btn" href="#cite">BibTeX</a>
+      </div>
+    </div>
+
+    <div class="editor-wrap">
+      <div class="editor" aria-label="One edit, three ways">
+        <div class="chrome"><i></i><i></i><i></i>cart.py — <span lang="en">change line 15</span><span lang="zh">修改第 15 行</span></div>
+        <div class="code">
+          <div class="ln" data-n="11"><span class="no">11</span><span class="tx"><span class="tok-k">def</span> <span class="tok-f">total</span>(<span class="tok-v">items</span>: <span class="tok-t">list</span>[<span class="tok-t">Item</span>]) -&gt; <span class="tok-t">float</span>:</span></div>
+          <div class="ln" data-n="12"><span class="no">12</span><span class="tx">    <span class="tok-s">"""Sum the cart before tax."""</span></span></div>
+          <div class="ln" data-n="13"><span class="no">13</span><span class="tx">    <span class="tok-v">s</span> = <span class="tok-n">0.0</span></span></div>
+          <div class="ln" data-n="14"><span class="no"><svg class="pinmark" viewBox="0 0 24 24"><circle cx="12" cy="8" r="6" fill="#ff3d8b"/><path d="M12 14v8" stroke="#ddd" stroke-width="2.4" stroke-linecap="round"/></svg>14</span><span class="tx">    <span class="tok-k">for</span> <span class="tok-v">x</span> <span class="tok-k">in</span> <span class="tok-v">items</span>:</span></div>
+          <div class="ln" data-n="15"><span class="no"><svg class="pinmark" viewBox="0 0 24 24"><circle cx="12" cy="8" r="6" fill="#5ea2ff"/><path d="M12 14v8" stroke="#ddd" stroke-width="2.4" stroke-linecap="round"/></svg>15</span><span class="tx">        <span class="tok-v">s</span> += <span class="tok-v">x</span>.<span class="tok-v">price</span></span></div>
+          <div class="ln" data-n="16"><span class="no">16</span><span class="tx">    <span class="tok-k">return</span> <span class="tok-v">s</span></span></div>
+        </div>
+        <div class="tabs" role="tablist">
+          <button role="tab" data-tab="quote" aria-selected="true"><span class="dot" style="background:var(--quote)"></span><span lang="en">Quote</span><span lang="zh">引原文</span></button>
+          <button role="tab" data-tab="point" aria-selected="false"><span class="dot" style="background:var(--point)"></span><span lang="en">Point</span><span lang="zh">指行号</span></button>
+          <button role="tab" data-tab="ours" aria-selected="false"><span class="dot" style="background:var(--accent)"></span><span lang="en">Point + quote ends</span><span lang="zh">指行号 + 引首尾</span></button>
+        </div>
+        <div class="call"></div>
+        <div class="verdict">&nbsp;</div>
+        <div class="progress"><i></i></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= TL;DR ======================= -->
+<section class="tldr">
+  <div class="wrap">
+    <div class="runlog reveal" id="runlog" aria-label="Key results">
+      <div class="runlog-bar"><i></i><i></i><i></i><span>results.log</span><span class="runlog-meta"><span lang="en">one harness · only the edit interface varies</span><span lang="zh">同一个 harness · 只改变编辑接口</span></span></div>
+      <div class="runlog-body">
+        <div class="rl c"><span lang="en"># S-Code harness · 6 models · 3 benchmarks · 4,700+ runs</span><span lang="zh"># S-Code harness · 6 个模型 · 3 个基准 · 4,700+ 次运行</span></div>
+        <div class="rl"><span class="tag t-info">accept</span><span class="k"><span lang="en">accepted, large refactors</span><span lang="zh">大文件重构 · 首次编辑被接受</span></span><span class="v"><span class="point">point</span> <b data-count="99" data-suffix="%">99%</b> <span class="dim">vs</span> <span class="quote">quote</span> <b data-count="58" data-suffix="%">58%</b></span></div>
+        <div class="rl"><span class="tag t-info">outcome</span><span class="k"><span lang="en">tasks solved, same runs</span><span lang="zh">同一批运行 · 任务解出</span></span><span class="v"><b data-count="94.4" data-dec="1" data-suffix="%">94.4%</b> <span class="dim">vs</span> <b data-count="94.4" data-dec="1" data-suffix="%">94.4%</b> <span class="dim"><span lang="en">← identical</span><span lang="zh">← 完全相同</span></span></span></div>
+        <div class="rl"><span class="tag t-warn">silent</span><span class="k"><span lang="en">large line-range edits that break the file</span><span lang="zh">把文件写坏的大范围行号编辑</span></span><span class="v"><b>1 <span class="dim">in</span> 5</b> <span class="dim"><span lang="en">· no error raised</span><span lang="zh">· 没有任何报错</span></span></span></div>
+        <div class="rl"><span class="tag t-ok">verified</span><span class="k"><span lang="en">broken first edits vs. line ranges</span><span lang="zh">写坏的首次编辑（对比行号范围）</span></span><span class="v"><b class="acc" data-count="-92" data-suffix="%">−92%</b> <span class="dim">MiMo</span> &nbsp;<b class="acc" data-count="-63" data-suffix="%">−63%</b> <span class="dim">luna</span></span></div>
+        <div class="rl"><span class="tag t-ok">verified</span><span class="k"><span lang="en">tasks per output token vs. search/replace</span><span lang="zh">每输出 token 解出任务数（对比搜索替换）</span></span><span class="v"><b class="acc" data-count="1.77" data-dec="2" data-suffix="×">1.77×</b> <span class="dim">luna</span> &nbsp;<b class="acc" data-count="1.43" data-dec="2" data-suffix="×">1.43×</b> <span class="dim">MiMo</span></span></div>
+        <div class="rl c caret-line"><span class="caret"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= TEASER ======================= -->
+<section class="teaser">
+  <div class="wrap">
+    <figure class="figcard reveal">
+      <img src="assets/img/fig_teaser_1600.webp" data-zoom="assets/img/fig_teaser.webp" width="1600" height="960" alt="Overview: data shapes fluency, the model sends edit calls, the harness checks them; one edit three ways." loading="eager">
+      <figcaption lang="en"><b>Fit, not format.</b> Training data makes a model fluent in pointing at code and in quoting it, to degrees that differ between models. Fit has a <b>model side</b> (how many attempts it needs) and a <b>system side</b> (what each attempt costs, and whether a wrong edit is caught). Click to enlarge.</figcaption>
+      <figcaption lang="zh"><b>重在契合，不在格式。</b>训练数据让模型学会两种指代代码的方式：指行号和引原文，但各家模型掌握的程度不同。契合有<b>模型侧</b>（需要尝试几次）和<b>系统侧</b>（每次尝试花多少、写错了能不能被发现）两面。点击图片放大。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ======================= ARTICLE ======================= -->
+<div class="article">
+
+<section class="chapter" id="puzzle" data-spy>
+  <div class="wrap"><div class="measure">
+    <div class="kicker"><span lang="en">01 · The puzzle</span><span lang="zh">01 · 一个谜题</span></div>
+    <h2 lang="en">Same tasks solved, very different first tries</h2>
+    <h2 lang="zh">解出的任务一样多，第一次尝试却天差地别</h2>
+    <p class="lede" lang="en">On large-file refactors, GPT-5.6-luna's first edit is accepted in 99% of runs when it points at the lines to change, and in 58% when it quotes them. Both ways solve 94.4% of the tasks.</p>
+    <p class="lede" lang="zh">在大文件重构上，GPT-5.6-luna 指行号时首次编辑的接受率是 99%，引原文时只有 58%。可两种写法解出的任务都是 94.4%。</p>
+    <p lang="en">We put six models through three code-editing benchmarks, more than 4,700 runs, in one harness where only the edit interface changes. The same pattern shows up everywhere: the first action swings widely between interfaces, and the final outcome barely moves.</p>
+    <p lang="zh">我们在同一个 harness 里只改变编辑接口，让六个模型跑了三个代码编辑基准，共 4,700 多次运行。到处都是同一个规律：第一步动作随接口大起大落，最终结果却几乎不动。</p>
+  </div></div>
+  <div class="wrap">
+    <div class="viz wide reveal" id="viz-puzzle">
+      <div class="viz-head">
+        <div class="viz-title"><span lang="en">Each row: one model on one benchmark</span><span lang="zh">每一行：一个模型在一个基准上</span></div>
+        <div class="toggle" role="group">
+          <button data-mode="acc" aria-pressed="true"><span lang="en">First edit accepted</span><span lang="zh">首次编辑被接受</span></button>
+          <button data-mode="suc" aria-pressed="false"><span lang="en">Task solved</span><span lang="zh">任务解出</span></button>
+        </div>
+      </div>
+      <svg aria-label="Acceptance versus task success by model and interface"></svg>
+      <div class="legend">
+        <span><i style="background:var(--quote);border-radius:50%"></i>search/replace</span>
+        <span><i style="background:var(--patch)"></i>patch</span>
+        <span><i style="background:var(--point);clip-path:polygon(50% 0,100% 100%,0 100%);border-radius:0"></i>line range</span>
+        <span><i style="background:var(--accent);opacity:.25;border-radius:999px;width:22px"></i><span lang="en">spread across interfaces</span><span lang="zh">三种接口的差距</span></span>
+      </div>
+      <p class="note" lang="en">Switch to <i>task solved</i> and the three interfaces fall into line. Paper Table 1, first run.</p>
+      <p class="note" lang="zh">切到“任务解出”，三种接口几乎挤到了一起。数据来自论文表 1（第一轮）。</p>
+    </div>
+  </div>
+  <div class="wrap"><div class="measure">
+    <p lang="en"><b>So where did the difference go?</b></p>
+    <p lang="zh"><b>那么，差距去哪儿了？</b></p>
+  </div></div>
+</section>
+
+<aside class="pull reveal"><div class="wrap"><blockquote><p lang="en">Task success, the usual yardstick, misses most of this.</p><p lang="zh">人们通常用的标尺——任务成功率——恰恰漏掉了这些。</p><cite><span lang="en">§1 · Introduction</span><span lang="zh">§1 · 引言</span></cite></blockquote></div></aside>
+
+<section class="chapter" id="cost" data-spy>
+  <div class="wrap"><div class="measure">
+    <div class="kicker"><span lang="en">02 · Result 1</span><span lang="zh">02 · 结果一</span></div>
+    <h2 lang="en">Success hides misfit; cost reveals it</h2>
+    <h2 lang="zh">成功率掩盖失配，成本把它暴露出来</h2>
+    <p lang="en">An agent stops when the model decides it is done, not when an edit fails. A rejected edit comes back as an error the model can act on: it rereads the file, retypes the edit, and tries again. The loop absorbs the failure, and bills for every lap.</p>
+    <p lang="zh">agent 什么时候停下，是模型自己判断任务完成了，而不是某次编辑失败了。被拒绝的编辑会以报错的形式回到模型手里：它重读文件、重打编辑、再试一次。循环把失败吸收掉了，但每转一圈都要付费。</p>
+
+    <div class="viz loop reveal" aria-hidden="true">
+      <svg viewBox="0 0 640 170">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--ink-2)"/></marker>
+        <marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--patch)"/></marker></defs>
+        <rect x="20" y="40" width="140" height="48" rx="12" fill="var(--paper)" stroke="var(--hair)"/>
+        <text x="90" y="69" text-anchor="middle" font-size="14" fill="var(--ink)">edit call</text>
+        <rect x="250" y="40" width="140" height="48" rx="12" fill="var(--paper)" stroke="var(--hair)"/>
+        <text x="320" y="69" text-anchor="middle" font-size="14" fill="var(--ink)">harness check</text>
+        <rect x="480" y="40" width="140" height="48" rx="12" fill="var(--paper)" stroke="var(--hair)"/>
+        <text x="550" y="69" text-anchor="middle" font-size="14" fill="var(--ink)">apply</text>
+        <path class="flow" d="M160 64 H246" stroke="var(--ink-2)" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+        <path class="flow" d="M390 64 H476" stroke="var(--point)" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+        <path class="flow" d="M320 88 C320 150, 90 150, 90 92" stroke="var(--patch)" stroke-width="2" fill="none" marker-end="url(#ahr)"/>
+        <text x="205" y="160" text-anchor="middle" font-size="12.5" fill="var(--patch)">mismatch → reread, retype, retry</text>
+        <text x="433" y="56" text-anchor="middle" font-size="12" fill="var(--point)">match</text>
+        <text x="320" y="22" text-anchor="middle" font-size="12" fill="var(--muted)">every lap re-reads the context and re-writes the edit</text>
+      </svg>
+    </div>
+
+    <p lang="en">On matched tasks, a run whose first targeted edit is rejected costs <b>1.2–1.8 times</b> as much as one whose first edit goes through. On the refactors, GPT-5.6-luna solves <b>1.64 times</b> as many tasks per output token with line ranges as with search/replace: its first line-range call is about half as long, and it rarely has to retry.</p>
+    <p lang="zh">在配对的同一批任务上，首次编辑被拒的运行，花费是首次编辑一次通过的 <b>1.2–1.8 倍</b>。在大文件重构上，GPT-5.6-luna 用行号范围时，每个输出 token 解出的任务数是搜索替换的 <b>1.64 倍</b>：它第一次调用的长度只有约一半，也很少需要重试。</p>
+    <div class="result reveal"><span class="rk"><span lang="en">Result 1</span><span lang="zh">结果一</span></span>
+      <span lang="en"><i>Success hides misfit; cost reveals it.</i> The agent loop turns failed edits into retries, so interfaces differ in what a task costs, not in whether it is solved. Compare them by first-action acceptance and tasks solved per output token, not by success alone.</span>
+      <span lang="zh"><i>成功率掩盖失配，成本把它暴露出来。</i>agent 循环把失败的编辑变成重试，所以不同接口的差别体现在任务花了多少，而不是能不能解出来。比较接口时，要看首次动作的接受率和每个输出 token 解出的任务数，不能只看成功率。</span>
+    </div>
+  </div></div>
+</section>
+
+<section class="chapter" id="evidence" data-spy>
+  <div class="wrap"><div class="measure">
+    <div class="kicker"><span lang="en">03 · Result 2</span><span lang="zh">03 · 结果二</span></div>
+    <h2 lang="en">Quoting is checkable; pointing is cheap and silent</h2>
+    <h2 lang="zh">引原文可以核对；指行号便宜，却不出声</h2>
+    <p lang="en">Every edit call carries an <b>address</b> (where), <b>evidence</b> of the target (what is there now), and the <b>new text</b>. Search/replace and patch quote the target, so the harness can refuse an edit that does not match the file. A line range carries no evidence at all; the harness can only check that the numbers are in range. Evidence works like a checksum on the address, and omitting it removes its cost, not the need for it.</p>
+    <p lang="zh">每次编辑调用都包含三部分：<b>地址</b>（改哪里）、目标的<b>证据</b>（那里现在是什么），以及<b>新内容</b>。搜索替换和补丁会引出原文，所以文件对不上时 harness 可以拒绝这次编辑。行号范围不带任何证据，harness 只能检查行号有没有越界。证据就像地址的校验和：省掉它，省掉的只是成本，需要它的场合并不会因此消失。</p>
+    <p lang="en">Quoting costs output and fails visibly: doubling the quoted text raises the odds of a no-match by about a quarter. Pointing saves that output, but on large edits the two failure modes split apart.</p>
+    <p lang="zh">引原文要花输出，失败时看得见：引用的原文长一倍，对不上的几率就增加约四分之一。指行号省下了这部分输出，但在大编辑上，两类失败彻底分道扬镳。</p>
+  </div></div>
+  <div class="wrap">
+    <div class="viz wide reveal" id="viz-region">
+      <div class="viz-head"><div class="viz-title"><span lang="en">Out of 100 large first edits (≥ 200 token-equivalents)</span><span lang="zh">每 100 个大编辑（≥ 200 个 token 当量）中</span></div></div>
+      <div class="unit-row"><div class="lab" style="color:var(--quote)">search/replace</div><div class="units" data-rej="12" data-brk="2"></div><div class="val"><span lang="en">12 rejected · 2 broken</span><span lang="zh">12 个被拒 · 2 个写坏</span></div></div>
+      <div class="unit-row"><div class="lab" style="color:var(--patch)">patch</div><div class="units" data-rej="9" data-brk="3"></div><div class="val"><span lang="en">9 rejected · 3 broken</span><span lang="zh">9 个被拒 · 3 个写坏</span></div></div>
+      <div class="unit-row"><div class="lab" style="color:var(--point)">line range</div><div class="units" data-rej="1" data-brk="20"></div><div class="val"><span lang="en">1 rejected · <b>20 broken</b></span><span lang="zh">1 个被拒 · <b>20 个写坏</b></span></div></div>
+      <div class="legend">
+        <span><i style="background:color-mix(in srgb, var(--quote) 70%, transparent)"></i><span lang="en">rejected: the agent sees an error</span><span lang="zh">被拒：agent 看得到报错</span></span>
+        <span><i style="background:var(--patch)"></i><span lang="en">applied, but the file no longer parses: silent</span><span lang="zh">已应用但文件无法解析：无声无息</span></span>
+      </div>
+      <p class="note" lang="en">Paper Figure 6 and Appendix B, rounded. Edits that land on the wrong lines but still parse are not counted at all.</p>
+      <p class="note" lang="zh">数据来自论文图 6 和附录 B（取整）。改错了位置但仍能解析的编辑，根本没被算进来。</p>
+    </div>
+  </div>
+  <div class="wrap"><div class="measure">
+    <p lang="en">Of the broken first line-range edits, <b>62%</b> would parse if one boundary moved by a single line. A pointer is cheap, and when it misses, it misses by one. In one RefactorBench run, GPT-5.6-luna adds a parameter in four files with a single call. In <span class="repo-inline">celery/apps/multi.py</span> it replaces lines 44–51, but its new text ends one line early and drops a closing parenthesis. The call is accepted, the file no longer parses, and the model is never told.</p>
+    <p lang="zh">写坏的首次行号编辑里，<b>62%</b> 只要把一端挪动一行就能解析。行号便宜，可一旦指偏，往往就偏一行。在一次 RefactorBench 运行中，GPT-5.6-luna 用一次调用在四个文件里加了一个参数。在 <span class="repo-inline">celery/apps/multi.py</span> 里它替换了第 44–51 行，但新内容少写了一行，丢了一个右括号。调用被接受了，文件已经无法解析，模型却从头到尾不知道。</p>
+    <div class="result reveal"><span class="rk"><span lang="en">Result 2</span><span lang="zh">结果二</span></span>
+      <span lang="en"><i>Evidence makes errors visible.</i> Quoting pays output for edits the harness can check; pointing saves output but fails silently, mostly with a boundary one line off.</span>
+      <span lang="zh"><i>证据让错误变得可见。</i>引原文用输出换来可核对的编辑；指行号省下输出，却会无声地失败，而且大多只是边界偏了一行。</span>
+    </div>
+  </div></div>
+</section>
+
+<aside class="pull reveal"><div class="wrap"><blockquote><p lang="en">Omitting evidence removes its cost, not the need for it.</p><p lang="zh">省掉证据，省掉的只是它的成本，不是对它的需要。</p><cite><span lang="en">§2.2 · Edit calls and the harness check</span><span lang="zh">§2.2 · 编辑调用与 harness 检查</span></cite></blockquote></div></aside>
+
+<section class="chapter" id="fit" data-spy>
+  <div class="wrap"><div class="measure">
+    <div class="kicker"><span lang="en">04 · Result 3</span><span lang="zh">04 · 结果三</span></div>
+    <h2 lang="en">Which form wins depends on the model</h2>
+    <h2 lang="zh">哪种写法更好，取决于模型</h2>
+    <p lang="en">Models learn both ways of referring to code from their training data. Compilers and tracebacks print <span class="repo-inline">file:line</span>; diffs quote the lines around a change. Post-training then adds the format of each developer's own harness. So <b>fluency</b>, how reliably a model writes a form, ends up different for every model.</p>
+    <p lang="zh">模型从训练数据里学会了两种指代代码的方式：编译器和 traceback 打印 <span class="repo-inline">file:line</span>，diff 则引用改动前后的原文。后训练又加上了各家开发者自己 harness 的格式。于是<b>流利度</b>，也就是模型写某种形式的可靠程度，每个模型都不一样。</p>
+  </div></div>
+  <div class="wrap">
+    <div class="viz wide reveal" id="viz-matrix">
+      <div class="viz-head"><div class="viz-title"><span lang="en">First edit accepted, by model and interface · outlined = that model's best</span><span lang="zh">首次编辑接受率（按模型 × 接口）· 加框为该模型的最佳</span></div></div>
+      <table class="matrix">
+        <thead><tr><th></th><th class="col" style="color:var(--quote)">search/replace</th><th class="col" style="color:var(--patch)">patch</th><th class="col" style="color:var(--point)">line range</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note" lang="en">Small print in each cell: share of tasks solved, which barely moves. Claude Sonnet 5 has no patch arm.</p>
+      <p class="note" lang="zh">每格下方的小字是任务解出率，几乎不变。Claude Sonnet 5 没有补丁这一组。</p>
+    </div>
+  </div>
+  <div class="wrap"><div class="measure">
+    <p lang="en">Line ranges fit GPT-5.6-luna and DeepSeek-V4-Flash, search/replace fits GLM-5.3 and MiMo-v2.5-Pro, and patch fits Qwen3.8-Flash. The model × interface interaction is overwhelming (<i>p</i> &lt; 10<sup>−40</sup>), and it holds even between search/replace and line ranges, two interfaces that differ only in whether they point or quote.</p>
+    <p lang="zh">行号范围最适合 GPT-5.6-luna 和 DeepSeek-V4-Flash，搜索替换最适合 GLM-5.3 和 MiMo-v2.5-Pro，补丁最适合 Qwen3.8-Flash。模型与接口的交互效应极强（<i>p</i> &lt; 10<sup>−40</sup>），即便只比较搜索替换和行号范围这两种只差在“引”还是“指”的接口，结论依然成立。</p>
+    <p lang="en">And left to choose, models do not reliably pick what they write best. Given one tool that accepts all three forms, GPT-5.6-luna picks the patch format its developer trains on more than twice as often as line ranges, although on its own its first patch is accepted in 23% of runs and its first line range in 99%.</p>
+    <p lang="zh">而让模型自己选时，它们并不总会挑写得最好的那种。给一个同时接受三种形式的工具，GPT-5.6-luna 选补丁（它的开发者训练所用的格式）的次数是行号范围的两倍多，可单独使用时，它的首次补丁只有 23% 被接受，首次行号范围却有 99%。</p>
+  </div></div>
+  <div class="wrap">
+    <div class="viz wide reveal" id="viz-habit">
+      <div class="viz-head"><div class="viz-title"><span lang="en">GPT-5.6-luna · habit vs. fluency</span><span lang="zh">GPT-5.6-luna · 习惯与流利度</span></div></div>
+      <div style="font:600 12.5px var(--mono);color:var(--ink-2);margin-bottom:6px"><span lang="en">What it reaches for first (one tool, three forms)</span><span lang="zh">首先伸手去拿的形式（一个工具、三种形式）</span></div>
+      <div class="stack">
+        <div data-w="49" style="background:var(--quote)">search/replace 49%</div>
+        <div data-w="35" style="background:var(--patch)">patch 35%</div>
+        <div data-w="16" style="background:var(--point)">16%</div>
+      </div>
+      <div style="font:600 12.5px var(--mono);color:var(--ink-2);margin:18px 0 0"><span lang="en">How often its first edit is accepted with each form alone</span><span lang="zh">单独使用每种形式时，首次编辑的接受率</span></div>
+      <div class="mini-bars">
+        <span style="color:var(--quote)">search/replace</span><div class="track"><i data-w="93" style="background:var(--quote)"></i></div><span>93%</span>
+        <span style="color:var(--patch)">patch</span><div class="track"><i data-w="23" style="background:var(--patch)"></i></div><span>23%</span>
+        <span style="color:var(--point)">line range</span><div class="track"><i data-w="99" style="background:var(--point)"></i></div><span>99%</span>
+      </div>
+    </div>
+  </div>
+  <div class="wrap"><div class="measure">
+    <p lang="en">Even packaging matters: offering three named tools instead of one tool with three argument shapes raises GPT-5.6-luna's first-edit acceptance by 16 points, because it then picks line ranges more often and patches less often.</p>
+    <p lang="zh">连包装方式都有影响：把“一个工具三种参数”换成“三个独立命名的工具”，GPT-5.6-luna 的首次编辑接受率提高了 16 个百分点，因为它会更多地选行号范围、更少地选补丁。</p>
+    <div class="result reveal"><span class="rk"><span lang="en">Result 3</span><span lang="zh">结果三</span></span>
+      <span lang="en"><i>Fit, not format; habit is not fluency.</i> Acceptance depends on the model and the interface together, and the form a model reaches for need not be the form it writes best.</span>
+      <span lang="zh"><i>重在契合，不在格式；习惯不等于流利。</i>接受率取决于模型和接口的组合，模型习惯伸手去拿的形式，未必是它写得最好的形式。</span>
+    </div>
+  </div></div>
+</section>
+
+<section class="chapter band-dark" id="method" data-spy>
+  <div class="wrap"><div class="measure">
+    <div class="kicker"><span lang="en">05 · The fix</span><span lang="zh">05 · 我们的做法</span></div>
+    <h2 lang="en">Verified selection: point, then quote just the two ends</h2>
+    <h2 lang="zh">校验选区：先指行号，再只引首尾两行</h2>
+    <p lang="en">Can one interface be cheap to write, checkable by the harness, and written well by every model? <b>Verified selection</b> asks only for the two forms every model is fluent in, the ones natural text teaches. It points with line numbers, as diagnostics and tracebacks do, and quotes only the first and last line of the span, as diffs do. The model states its intent; the harness does the bookkeeping.</p>
+    <p lang="zh">有没有一种接口，写起来便宜、harness 能核对、每个模型都写得好？<b>校验选区</b>只要求每个模型都流利的两种形式，也就是自然文本教会它们的那两种：像编译诊断和 traceback 那样指行号，再像 diff 那样只引出选区的首行和尾行。模型只负责说清意图，记账的事交给 harness。</p>
+  </div></div>
+  <div class="wrap">
+    <div class="viz wide reveal" id="viz-lines">
+      <div class="viz-head"><div class="viz-title"><span lang="en">What the model has to write to move a 30-line block</span><span lang="zh">搬动一段 30 行的代码，模型要写多少</span></div><button class="replay" type="button" aria-label="replay">↻</button></div>
+      <div class="lines-row"><div class="lab" style="color:#b9bcc4">search/replace</div><div class="bars" data-quote="30" data-new="30"></div><div class="val"><span lang="en">quote it, then retype it</span><span lang="zh">先引出原文，再重打一遍</span><b>≈ 60</b></div></div>
+      <div class="lines-row"><div class="lab" style="color:var(--point)">line range</div><div class="bars" data-new="30"></div><div class="val"><span lang="en">retype it once</span><span lang="zh">重打一遍</span><b>≈ 30</b></div></div>
+      <div class="lines-row"><div class="lab" style="color:var(--accent)">verified + @@ref</div><div class="bars" data-ends="4" data-ref="1"></div><div class="val"><span lang="en">ends + one marker line</span><span lang="zh">引首尾 + 一行标记</span><b>1 + <span style="font-weight:500">ends</span></b></div></div>
+      <div class="legend">
+        <span><i style="background:#8a8d96"></i><span lang="en">quoted to find the target</span><span lang="zh">为定位而引用的原文</span></span>
+        <span><i style="background:#e9e6de"></i><span lang="en">retyped code</span><span lang="zh">重打的代码</span></span>
+        <span><i style="background:transparent;box-shadow:0 0 0 1.5px var(--accent) inset"></i><span lang="en">quoted boundary line</span><span lang="zh">引用的边界行</span></span>
+        <span><i style="background:var(--accent)"></i><span class="repo-inline">@@ref 121-150@@</span></span>
+      </div>
+      <p class="note" lang="en">Lines of output, schematic (paper §2.3 and Figure 2e): the harness copies the 30 lines it already showed the model; the model writes one.</p>
+      <p class="note" lang="zh">按输出行数示意（论文 §2.3 与图 2e）：这 30 行 harness 早就给模型看过，由 harness 复制；模型只写一行。</p>
+    </div>
+  </div>
+  <div class="wrap"><div class="measure">
+    <div class="principles">
+      <div class="principle reveal"><span class="pk">P1</span><span lang="en"><b>Point with numbers, verify with boundaries.</b> The model gives <span class="repo-inline">start_line</span>/<span class="repo-inline">end_line</span> and quotes <span class="repo-inline">first_line</span>/<span class="repo-inline">last_line</span>; the edit is applied only if both quotes match.</span><span lang="zh"><b>用行号指，用边界验。</b>模型给出 <span class="repo-inline">start_line</span>/<span class="repo-inline">end_line</span>，再引出 <span class="repo-inline">first_line</span>/<span class="repo-inline">last_line</span>；两端都对上才会应用。</span></div>
+      <div class="principle reveal"><span class="pk">P2</span><span lang="en"><b>Absorb small offsets when the evidence agrees.</b> If both quoted lines sit the same few lines away, the range moves; otherwise the edit is refused, with the true location.</span><span lang="zh"><b>证据一致时，吸收小偏移。</b>如果两端原文都偏了同样几行，选区整体挪过去；否则拒绝这次编辑，并告诉模型原文真正在哪。</span></div>
+      <div class="principle reveal"><span class="pk">P3</span><span lang="en"><b>Reference instead of retyping.</b> A line <span class="repo-inline">@@ref A-B@@</span> copies already-read lines, so moving a block costs one line of output.</span><span lang="zh"><b>引用而不重打。</b>一行 <span class="repo-inline">@@ref A-B@@</span> 就能复制已读过的行，搬动一整块代码只需输出一行。</span></div>
+      <div class="principle reveal"><span class="pk">P4</span><span lang="en"><b>One snapshot, no drift.</b> All ranges refer to the file as read, and edits apply bottom-up, so earlier edits never shift later line numbers.</span><span lang="zh"><b>同一快照，不会漂移。</b>所有行号都指向读到的那一版文件，编辑从下往上应用，前面的修改不会挪动后面的行号。</span></div>
+    </div>
+    <details class="more">
+      <summary><span lang="en">The four call syntaxes side by side (paper Figure 2)</span><span lang="zh">四种调用写法对照（论文图 2）</span></summary>
+      <div class="inner"><img src="assets/img/fig_interfaces.svg" data-zoom="assets/img/fig_interfaces.svg" alt="One edit in four interfaces" loading="lazy" style="cursor:zoom-in"></div>
+    </details>
+    <p lang="en">Every run in this study uses <a href="https://github.com/sai-foundation/s-code" target="_blank" rel="noopener"><b>S-Code</b></a>, an open-source terminal coding-agent harness, so only the edit interface varies. Compared with plain line ranges, the model sees two extra string fields, a note on <span class="repo-inline">@@ref</span> in the schema, and one paragraph of instructions. <a href="https://github.com/sai-foundation/s-code" target="_blank" rel="noopener">★ Star S-Code on GitHub</a>.</p>
+    <p lang="zh">本研究的所有运行都基于开源的终端编程 agent harness <a href="https://github.com/sai-foundation/s-code" target="_blank" rel="noopener"><b>S-Code</b></a>，因此只有编辑接口这一个变量。相比普通的行号范围，模型看到的改动只有两个字符串字段、schema 里一条关于 <span class="repo-inline">@@ref</span> 的说明，以及一段使用说明。<a href="https://github.com/sai-foundation/s-code" target="_blank" rel="noopener">★ 去 GitHub 给 S-Code 点个 Star</a>。</p>
+  </div></div>
+</section>
+
+<section class="chapter" id="results" data-spy>
+  <div class="wrap"><div class="measure">
+    <div class="kicker"><span lang="en">06 · Result 4</span><span lang="zh">06 · 结果四</span></div>
+    <h2 lang="en">Cheap like a pointer, checked like a quote</h2>
+    <h2 lang="zh">像指行号一样便宜，像引原文一样可核对</h2>
+    <p lang="en">On the large-file refactors, over two runs, verified selection removes most of the silent breakage that bare line ranges let through.</p>
+    <p lang="zh">在大文件重构上，两轮实验合计，校验选区消除了裸行号范围放过的大部分无声破坏。</p>
+  </div></div>
+  <div class="wrap">
+    <div class="viz wide reveal" id="viz-broken">
+      <div class="viz-head">
+        <div class="viz-title"><span lang="en">Broken first edits on the refactors, two runs pooled</span><span lang="zh">大文件重构中写坏的首次编辑（两轮合计）</span></div>
+        <div class="toggle" role="group">
+          <button data-bmode="lr" aria-pressed="true"><span lang="en">Line ranges</span><span lang="zh">行号范围</span></button>
+          <button data-bmode="ours" aria-pressed="false"><span lang="en">Verified selection</span><span lang="zh">校验选区</span></button>
+        </div>
+      </div>
+      <div class="unit-row"><div class="lab">MiMo-v2.5-Pro</div><div class="units" id="u-mimo" data-from="71" data-to="6"></div><div class="val" data-for="u-mimo" data-lr="71" data-ours="<b style='color:var(--accent)'>6</b> &nbsp;(−92%)">71</div></div>
+      <div class="unit-row"><div class="lab">GPT-5.6-luna</div><div class="units" id="u-luna" data-from="19" data-to="7"></div><div class="val" data-for="u-luna" data-lr="19" data-ours="<b style='color:var(--accent)'>7</b> &nbsp;(−63%)">19</div></div>
+    </div>
+    <div class="viz wide reveal" id="viz-eff">
+      <div class="viz-head"><div class="viz-title"><span lang="en">Tasks solved per output token, relative to search/replace (two runs pooled)</span><span lang="zh">每输出 token 解出的任务数，相对搜索替换（两轮合计）</span></div></div>
+      <div class="mini-bars" style="grid-template-columns: 210px 1fr 56px">
+        <span>GPT-5.6-luna · line range</span><div class="track"><i data-w="82" style="background:var(--point)"></i></div><span>1.64×</span>
+        <span><b>GPT-5.6-luna · verified</b></span><div class="track"><i data-w="88.5" style="background:var(--accent)"></i></div><span><b>1.77×</b></span>
+        <span>MiMo-v2.5-Pro · line range</span><div class="track"><i data-w="57" style="background:var(--point);opacity:.55"></i></div><span>1.14×</span>
+        <span><b>MiMo-v2.5-Pro · verified</b></span><div class="track"><i data-w="71.5" style="background:var(--accent)"></i></div><span><b>1.43×</b></span>
+      </div>
+      <p class="note" lang="en">Bars run from 0 to 2×. For MiMo-v2.5-Pro, bare line ranges are not significantly more efficient than search/replace, while verified selection is; compared with bare line ranges, it also raises task success (p = .002).</p>
+      <p class="note" lang="zh">条形刻度从 0 到 2×。对 MiMo-v2.5-Pro，裸行号范围的效率并不显著高于搜索替换，校验选区则显著更高；与裸行号范围相比，它还提高了任务成功率（p = .002）。</p>
+    </div>
+  </div>
+  <div class="wrap"><div class="measure">
+    <div class="numbers">
+      <div class="reveal"><b>11 → 2</b><span lang="en">broken first edits on Microsoft's multi-file RefactorBench, where one call often changes several files.</span><span lang="zh">微软的多文件 RefactorBench 上写坏的首次编辑数；那里一次调用常常要改好几个文件。</span></div>
+      <div class="reveal"><b>16%</b><span lang="en">of first edits on the refactors give line numbers that contradict their own quotes; a third of them would have parsed, invisible to any parse check.</span><span lang="zh">的大文件重构首次编辑，行号和它自己引的原文对不上；其中三分之一按裸行号也能解析，任何语法检查都发现不了。</span></div>
+      <div class="reveal"><b>78 <small style="font-size:.6em;color:var(--muted)">vs</small> 70</b><span lang="en">of 80 Claude Sonnet 5 runs edit in place on the first try with verified selection vs. the string replacement it was trained on.</span><span lang="zh">在 80 次运行中，Claude Sonnet 5 第一次就原地改好的次数：校验选区对比它被训练使用的字符串替换。</span></div>
+    </div>
+    <details class="more">
+      <summary><span lang="en">The full ablation (paper Figure 8)</span><span lang="zh">完整消融实验（论文图 8）</span></summary>
+      <div class="inner"><img src="assets/img/fig_method.svg" alt="Ablation: boundary check, alignment, @@ref" loading="lazy"></div>
+    </details>
+    <div class="result reveal"><span class="rk"><span lang="en">Result 4</span><span lang="zh">结果四</span></span>
+      <span lang="en"><i>Pointing checked at its boundaries keeps most of the efficiency of pointing and removes most of its silent errors,</i> on large files and on edits that span files.</span>
+      <span lang="zh"><i>在边界处加以核对的指行号，保住了指行号的大部分效率，又消除了它的大部分无声错误。</i>在大文件和跨文件编辑上都成立。</span>
+    </div>
+  </div></div>
+</section>
+
+<aside class="pull reveal"><div class="wrap"><blockquote><p lang="en">The model states its intent. The harness does the bookkeeping.</p><p lang="zh">模型只负责说清意图，记账的事交给 harness。</p><cite><span lang="en">§5 · Designing for shared fluency</span><span lang="zh">§5 · 为共同的流利度而设计</span></cite></blockquote></div></aside>
+
+<section class="chapter" id="lessons" data-spy>
+  <div class="wrap"><div class="measure">
+    <div class="kicker"><span lang="en">07 · Takeaways</span><span lang="zh">07 · 启示</span></div>
+    <h2 lang="en">What this means for harness builders</h2>
+    <h2 lang="zh">这对做 harness 的人意味着什么</h2>
+    <p lang="en"><b>Measure the loop, not only the outcome.</b> An interface defect rarely shows up as a failed task. It shows up as tokens spent getting there. Report first-action acceptance and tasks solved per output token alongside success, within each model.</p>
+    <p lang="zh"><b>衡量整个循环，而不只是结果。</b>接口的缺陷很少表现为任务失败，而是表现为为了做成任务多花的 token。除了成功率，还要在同一模型内报告首次动作接受率和每输出 token 解出的任务数。</p>
+    <p lang="en"><b>Ask the model only for its intent.</b> A model's output is the most expensive and least exact part of an edit. Ask for a pointer and the least evidence that makes it checkable, and let the harness number, check, align and copy. Those steps are exact and nearly free for a harness; output tokens are decoded one at a time, while what is already in context sits in the KV cache.</p>
+    <p lang="zh"><b>只向模型要它的意图。</b>模型的输出是一次编辑里最贵、也最不精确的部分。只向它要一个指针，再加上让这个指针可被核对的最少证据；编号、核对、对齐、复制都交给 harness。这些步骤对 harness 来说精确又几乎免费；输出 token 却要一个一个地解码，而已经在上下文里的内容只需从 KV 缓存里读出来。</p>
+    <p class="lede" lang="en">The lesson for edit interfaces is <b>fit, not format</b>.</p>
+    <p class="lede" lang="zh">编辑接口的教训就是：<b>重在契合，不在格式</b>。</p>
+  </div></div>
+</section>
+
+<section class="video" id="video">
+  <div class="wrap"><div class="measure" style="max-width:900px">
+    <div class="kicker" style="font:600 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:12px"><span lang="en">The 90-second version</span><span lang="zh">90 秒看完</span></div>
+    <video controls preload="none" playsinline poster="assets/img/video_poster.webp">
+      <source src="assets/video/promo.mp4" type="video/mp4">
+    </video>
+  </div></div>
+</section>
+
+<section class="chapter cite" id="cite" data-spy>
+  <div class="wrap"><div class="measure">
+    <div class="kicker"><span lang="en">Cite</span><span lang="zh">引用</span></div>
+    <div style="position:relative">
+      <button class="copy" data-target="#bib">copy</button>
+<pre id="bib">@article{wan2026fitnotformat,
+  title   = {Physics of Coding Agents: Part 1,
+             Fit, Not Format at the Edit Interface},
+  author  = {Wan, Langlin and Liang, Zhixuan and
+             Wang, Guangyuan and Liu, Shilong},
+  journal = {Preprints},
+  year    = {2026},
+  doi     = {10.20944/preprints202610.1889.v1},
+  url     = {https://www.preprints.org/manuscript/202610.1889}
+}</pre>
+    </div>
+  </div></div>
+  <div class="wrap">
+    <div class="cta reveal">
+      <div>
+        <h3 lang="en">If this was useful, a star helps.</h3>
+        <h3 lang="zh">如果对你有帮助，欢迎点个 Star。</h3>
+        <p lang="en">The paper repository holds the harness changes, task lists, run logs and every analysis script. S-Code is the open-source harness every run used.</p>
+        <p lang="zh">论文仓库包含 harness 改动、任务列表、运行日志和所有分析脚本。S-Code 是所有实验运行所用的开源 harness。</p>
+      </div>
+      <div class="stars">
+        <a class="star" href="https://github.com/WanLanglin/fit-not-format-edit-harness" target="_blank" rel="noopener">
+          <span><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .67.42l1.88 3.8 4.2.61a.75.75 0 0 1 .41 1.28l-3.04 2.96.72 4.18a.75.75 0 0 1-1.09.79L8 12.33l-3.75 1.96a.75.75 0 0 1-1.09-.79l.72-4.18L.84 6.36a.75.75 0 0 1 .41-1.28l4.2-.61L7.33.67A.75.75 0 0 1 8 .25Z"/></svg> WanLanglin/fit-not-format-edit-harness<small><span lang="en">paper code &amp; data</span><span lang="zh">论文代码与数据</span></small></span>
+          <span class="count" data-stars="WanLanglin/fit-not-format-edit-harness">★</span>
+        </a>
+        <a class="star" href="https://github.com/sai-foundation/s-code" target="_blank" rel="noopener">
+          <span><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .67.42l1.88 3.8 4.2.61a.75.75 0 0 1 .41 1.28l-3.04 2.96.72 4.18a.75.75 0 0 1-1.09.79L8 12.33l-3.75 1.96a.75.75 0 0 1-1.09-.79l.72-4.18L.84 6.36a.75.75 0 0 1 .41-1.28l4.2-.61L7.33.67A.75.75 0 0 1 8 .25Z"/></svg> sai-foundation/s-code<small><span lang="en">the coding-agent harness</span><span lang="zh">编程 agent harness</span></small></span>
+          <span class="count" data-stars="sai-foundation/s-code">★</span>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span lang="en">Physics of Coding Agents · Part 1 · 2026 ·</span><span lang="zh">Physics of Coding Agents · 第一部分 · 2026 ·</span>
+    <a href="https://github.com/WanLanglin/fit-not-format-edit-harness">GitHub</a> ·
+    <a href="https://github.com/sai-foundation/s-code">S-Code</a>
+  </div>
+</footer>
+
+<div class="lightbox" role="dialog" aria-label="Figure"><img alt=""></div>
+<script src="assets/js/site.js" defer></script>
+</body>
+</html>
