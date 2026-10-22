@@ -350,14 +350,15 @@
   /* ---------------- GitHub stars ---------------- */
   $$('[data-stars]').forEach(async (el) => {
     const repo = el.dataset.stars;
+    const show = (txt) => { if (txt === '0') el.remove(); else el.textContent = txt; };   // no count until there is one
     try {
       const cached = JSON.parse(store.get('stars:' + repo) || 'null');
-      if (cached && Date.now() - cached.t < 36e5) { el.textContent = cached.n; return; }
+      if (cached && Date.now() - cached.t < 36e5) { show(cached.n); return; }
       const r = await fetch(`https://api.github.com/repos/${repo}`);
       if (!r.ok) return;
       const n = (await r.json()).stargazers_count;
       const txt = n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
-      el.textContent = txt;
+      show(txt);
       store.set('stars:' + repo, JSON.stringify({ n: txt, t: Date.now() }));
     } catch { /* offline or rate-limited: keep the placeholder */ }
   });
